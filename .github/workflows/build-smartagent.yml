@@ -642,11 +642,16 @@ jobs:
             exit 1
           fi
 
-          cp -a "$project_root/." "$GITHUB_WORKSPACE/"
+          installed_marker="$GITHUB_WORKSPACE/.smartagent-project-version"
+          installed_version="$(cat "$installed_marker" 2>/dev/null || true)"
 
-          workflow_ref="${GITHUB_WORKFLOW_REF#${GITHUB_REPOSITORY}/}"
-          installer_path="${workflow_ref%@*}"
-          rm -f "$GITHUB_WORKSPACE/$installer_path"
+          if [[ "$installed_version" != "0.3.1" ]]; then
+            rsync -a --exclude='.github/' "$project_root/" "$GITHUB_WORKSPACE/"
+            printf '0.3.1\n' > "$installed_marker"
+            echo "Complete SmartAgent project prepared for repository upload."
+          else
+            echo "SmartAgent 0.3.1 project is already installed."
+          fi
 
           cd "$GITHUB_WORKSPACE"
           git config user.name "github-actions[bot]"
@@ -693,4 +698,3 @@ jobs:
           path: apk-output/SmartAgent-v0.3.1-debug.apk
           if-no-files-found: error
           retention-days: 30
-
