@@ -1,5 +1,6 @@
 package com.smartagent.app.data
 
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URI
@@ -9,7 +10,8 @@ import java.net.URL
 data class ProductPageMetadata(
     val resolvedUrl: String,
     val text: String,
-    val sourceLabel: String
+    val sourceLabel: String,
+    val isProductSpecific: Boolean
 )
 
 object ProductPageMetadataClient {
@@ -42,18 +44,30 @@ object ProductPageMetadataClient {
         return ProductPageMetadata(
             resolvedUrl = resolvedUrl,
             text = metadata,
-            sourceLabel = "TikTok public caption"
+            sourceLabel = "TikTok public caption",
+            isProductSpecific = false
         )
     }
 
     private fun fetchOpenGraph(resolvedUrl: String): ProductPageMetadata? {
         val html = readUrl(resolvedUrl, acceptJson = false) ?: return null
+        val structuredProduct = findStructuredProduct(html)
         val title = findMeta(html, "og:title")
+            .ifBlank { structuredProduct?.optString("name").orEmpty() }
             .ifBlank { findTitle(html) }
         val description = findMeta(html, "og:description")
+            .ifBlank { structuredProduct?.optString("description").orEmpty() }
             .ifBlank { findMeta(html, "description") }
+        val offers = structuredProduct?.let(::firstOffer)
         val price = findMeta(html, "product:price:amount")
+            .ifBlank { offers?.optString("price").orEmpty() }
+            .ifBlank { offers?.optString("lowPrice").orEmpty() }
         val currency = findMeta(html, "product:price:currency")
+            .ifBlank { offers?.optString("priceCurrency").orEmpty() }
+        val image = findMeta(html, "og:image")
+            .ifBlank { structuredProduct?.let(::firstImage).orEmpty() }
+        val brand = structuredProduct?.let(::brandName).orEmpty()
+        val seller = offers?.optJSONObject("seller")?.optString("name").orEmpty()
         if (title.isBlank() && description.isBlank() && price.isBlank()) return null
 
         val metadata = buildString {
@@ -64,13 +78,73 @@ object ProductPageMetadataClient {
                 if (currency.isNotBlank()) append(' ').append(currency)
                 append('\n')
             }
+            if (brand.isNotBlank()) append("Brand: ").append(brand).append('\n')
+            if (seller.isNotBlank()) append("Seller: ").append(seller).append('\n')
+            if (image.isNotBlank()) append("Product image: ").append(image).append('\n')
         }.trim()
 
         return ProductPageMetadata(
             resolvedUrl = resolvedUrl,
             text = metadata,
-            sourceLabel = "public page metadata"
+            sourceLabel = if (structuredProduct != null) {
+                "product structured data and public page metadata"
+            } else {
+                "public page metadata"
+            },
+            isProductSpecific = structuredProduct != null || price.isNotBlank()
         )
+    }
+
+    private fun findStructuredProduct(html: String): JSONObject? {
+        for (match in JSON_LD.findAll(html)) {
+            val raw = decodeHtml(match.groupValues[1]).trim()
+            val value = runCatching { org.json.JSONTokener(raw).nextValue() }.getOrNull() ?: continue
+            findProductObject(value)?.let { return it }
+        }
+        return null
+    }
+
+    private fun findProductObject(value: Any?): JSONObject? {
+        return when (value) {
+            is JSONObject -> {
+                val type = value.opt("@type")
+                val isProduct = when (type) {
+                    is String -> type.equals("Product", ignoreCase = true)
+                    is JSONArray -> (0 until type.length()).any {
+                        type.optString(it).equals("Product", ignoreCase = true)
+                    }
+                    else -> false
+                }
+                if (isProduct) value else findProductObject(value.optJSONArray("@graph"))
+            }
+            is JSONArray -> {
+                for (index in 0 until value.length()) {
+                    val product = findProductObject(value.opt(index))
+                    if (product != null) return product
+                }
+                null
+            }
+            else -> null
+        }
+    }
+
+    private fun firstOffer(product: JSONObject): JSONObject? = when (val offers = product.opt("offers")) {
+        is JSONObject -> offers
+        is JSONArray -> offers.optJSONObject(0)
+        else -> null
+    }
+
+    private fun firstImage(product: JSONObject): String = when (val image = product.opt("image")) {
+        is String -> image
+        is JSONArray -> image.optString(0)
+        is JSONObject -> image.optString("url")
+        else -> ""
+    }
+
+    private fun brandName(product: JSONObject): String = when (val brand = product.opt("brand")) {
+        is String -> brand
+        is JSONObject -> brand.optString("name")
+        else -> ""
     }
 
     private fun readUrl(url: String, acceptJson: Boolean): String? {
@@ -137,5 +211,9 @@ object ProductPageMetadataClient {
     private val META_TAG = Regex("<meta\\b[^>]*>", RegexOption.IGNORE_CASE)
     private val ATTRIBUTE = Regex("([a-zA-Z_:.-]+)\\s*=\\s*(['\"])(.*?)\\2", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
     private val TITLE = Regex("<title[^>]*>(.*?)</title>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+    private val JSON_LD = Regex(
+        "<script[^>]*type\\s*=\\s*['\"]application/ld\\+json['\"][^>]*>(.*?)</script>",
+        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
+    )
     private const val MAX_RESPONSE_CHARS = 1_000_000
 }

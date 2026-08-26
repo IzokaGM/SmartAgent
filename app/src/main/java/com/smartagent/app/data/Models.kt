@@ -31,6 +31,7 @@ data class ContentRequest(
     val productLink: String = "",
     val productName: String = "",
     val productFacts: String = "",
+    val verificationSummary: String = "",
     val platform: Platform = Platform.TIKTOK,
     val durationSeconds: Int = 30,
     val language: OutputLanguage = OutputLanguage.MALAY,
@@ -49,9 +50,41 @@ data class GenerationRecord(
 
 data class ProductDetails(
     val name: String,
-    val facts: String,
+    val price: String = "",
+    val description: String = "",
+    val features: List<String> = emptyList(),
+    val seller: String = "",
+    val promotion: String = "",
+    val imageUrl: String = "",
     val resolvedUrl: String,
-    val retrievalNote: String = ""
-)
+    val sourceLabel: String,
+    val confidence: ExtractionConfidence,
+    val warning: String = "",
+    val requiresBrowserReview: Boolean = false
+) {
+    fun verifiedFactsText(): String = buildString {
+        appendField("Price", price)
+        appendField("Description", description)
+        if (features.isNotEmpty()) {
+            append("Features:\n")
+            features.filter { it.isNotBlank() }.forEach { feature ->
+                append("- ").append(feature.trim()).append('\n')
+            }
+        }
+        appendField("Seller", seller)
+        appendField("Promotion", promotion)
+    }.trim()
+
+    private fun StringBuilder.appendField(label: String, value: String) {
+        val clean = value.trim()
+        if (clean.isNotBlank()) append(label).append(": ").append(clean).append('\n')
+    }
+}
+
+enum class ExtractionConfidence(val label: String) {
+    HIGH("High confidence"),
+    MEDIUM("Check details"),
+    LOW("Needs review")
+}
 
 class ProductAccessBlockedException(message: String) : Exception(message)

@@ -5,8 +5,13 @@ import java.net.URI
 import java.net.URL
 
 object ProductLinkResolver {
+    fun extractUrl(rawText: String): String? = URL_PATTERN.find(rawText)
+        ?.value
+        ?.trimEnd('.', ',', ';', ':', ')', ']', '}', '\'', '"')
+
     fun resolve(rawUrl: String): Result<String> = runCatching {
-        val trimmed = rawUrl.trim()
+        val trimmed = extractUrl(rawUrl)
+            ?: error("No complete product link beginning with https:// was found")
         val uri = URI(trimmed)
         require(uri.scheme == "https" || uri.scheme == "http") {
             "Enter a complete Shopee or TikTok link beginning with https://"
@@ -42,4 +47,5 @@ object ProductLinkResolver {
     }
 
     private const val MAX_REDIRECTS = 8
+    private val URL_PATTERN = Regex("https?://[^\\s<>]+", RegexOption.IGNORE_CASE)
 }

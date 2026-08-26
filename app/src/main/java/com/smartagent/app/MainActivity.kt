@@ -33,6 +33,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -73,6 +74,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.smartagent.app.data.ContentRequest
 import com.smartagent.app.data.ContentStyle
+import com.smartagent.app.data.ExtractionConfidence
 import com.smartagent.app.data.GenerationRecord
 import com.smartagent.app.data.GeminiClient
 import com.smartagent.app.data.ImageUtils
@@ -81,6 +83,8 @@ import com.smartagent.app.data.LocalRepository
 import com.smartagent.app.data.OutputLanguage
 import com.smartagent.app.data.Platform
 import com.smartagent.app.data.ProductAccessBlockedException
+import com.smartagent.app.data.ProductDetails
+import com.smartagent.app.data.ProductLinkResolver
 import com.smartagent.app.data.PromptBuilder
 import com.smartagent.app.data.SecureKeyStore
 import com.smartagent.app.ui.theme.SmartAgentTheme
@@ -230,7 +234,16 @@ private fun CreateScreen(
     var mode by rememberSaveable { mutableStateOf(InputMode.AFFILIATE) }
     var productLink by rememberSaveable { mutableStateOf("") }
     var productName by rememberSaveable { mutableStateOf("") }
+    var productPrice by rememberSaveable { mutableStateOf("") }
+    var productDescription by rememberSaveable { mutableStateOf("") }
+    var productFeatures by rememberSaveable { mutableStateOf("") }
+    var productSeller by rememberSaveable { mutableStateOf("") }
+    var productPromotion by rememberSaveable { mutableStateOf("") }
     var productFacts by rememberSaveable { mutableStateOf("") }
+    var extractionSource by rememberSaveable { mutableStateOf("") }
+    var extractionConfidence by remember { mutableStateOf<ExtractionConfidence?>(null) }
+    var extractionWarning by rememberSaveable { mutableStateOf("") }
+    var verifiedByUser by rememberSaveable { mutableStateOf(false) }
     var platform by rememberSaveable { mutableStateOf(Platform.TIKTOK) }
     var duration by rememberSaveable { mutableStateOf(30) }
     var language by rememberSaveable { mutableStateOf(OutputLanguage.MALAY) }
@@ -251,9 +264,23 @@ private fun CreateScreen(
 
     LaunchedEffect(incomingText) {
         if (incomingText.isNotBlank() && incomingText != productLink) {
-            productLink = incomingText
+            productLink = ProductLinkResolver.extractUrl(incomingText) ?: incomingText
             mode = InputMode.AFFILIATE
         }
+    }
+
+    val applyProductDetails: (ProductDetails) -> Unit = { product ->
+        productLink = product.resolvedUrl.ifBlank { productLink }
+        productName = product.name
+        productPrice = product.price
+        productDescription = product.description
+        productFeatures = product.features.joinToString("\n")
+        productSeller = product.seller
+        productPromotion = product.promotion
+        extractionSource = product.sourceLabel
+        extractionConfidence = product.confidence
+        extractionWarning = product.warning
+        verifiedByUser = false
     }
 
     val imagePicker = rememberLauncherForActivityResult(
@@ -267,9 +294,31 @@ private fun CreateScreen(
                     withContext(Dispatchers.IO) {
                         ImageUtils.readAndCompress(context.contentResolver, uri)
                     }
-                }.onSuccess {
-                    imageBase64 = it
-                    imageStatus = "Screenshot ready"
+                }.onSuccess { encodedImage ->
+                    imageBase64 = encodedImage
+                    val key = secureKeyStore.loadApiKey()
+                    if (key == null) {
+                        imageStatus = "Screenshot ready. Add your Gemini API key to extract its details."
+                    } else {
+                        imageStatus = "Extracting product details from screenshot..."
+                        val details = withContext(Dispatchers.IO) {
+                            geminiClient.extractProductFromImage(
+                                apiKey = key,
+                                model = repository.loadModel(),
+                                imageBase64 = encodedImage,
+                                productUrl = productLink
+                            )
+                        }
+                        details.onSuccess { product ->
+                            applyProductDetails(product)
+                            imageStatus = "Screenshot extracted. Check every field below."
+                            extractionStatus = imageStatus
+                            errorMessage = ""
+                        }.onFailure { failure ->
+                            imageStatus = "Screenshot attached, but its details could not be extracted."
+                            errorMessage = failure.message ?: "Could not extract the screenshot"
+                        }
+                    }
                 }.onFailure {
                     imageBase64 = null
                     imageStatus = "Could not read screenshot"
@@ -308,9 +357,7 @@ private fun CreateScreen(
                             )
                         }
                         details.onSuccess { product ->
-                            productLink = product.resolvedUrl
-                            if (product.name.isNotBlank()) productName = product.name
-                            if (product.facts.isNotBlank()) productFacts = product.facts
+                            applyProductDetails(product)
                             extractionStatus = "Product details captured. Check them before generating."
                             errorMessage = ""
                             showProductBrowser = false
@@ -382,7 +429,13 @@ private fun CreateScreen(
             item {
                 OutlinedTextField(
                     value = productLink,
-                    onValueChange = { productLink = it },
+                    onValueChange = {
+                        productLink = it
+                        extractionSource = ""
+                        extractionConfidence = null
+                        extractionWarning = ""
+                        verifiedByUser = false
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("Shopee or TikTok product link") },
                     placeholder = { Text("Paste or share a product link") },
@@ -409,7 +462,7 @@ private fun CreateScreen(
                                     productLink.isBlank() -> {
                                         errorMessage = "Paste a Shopee or TikTok product link first."
                                     }
-                                    !productLink.trim().matches(Regex("^https?://.+", RegexOption.IGNORE_CASE)) -> {
+                                    ProductLinkResolver.extractUrl(productLink) == null -> {
                                         errorMessage = "Enter a complete product link beginning with https://"
                                     }
                                     else -> {
@@ -424,13 +477,14 @@ private fun CreateScreen(
                                                 )
                                             }
                                             details.onSuccess { product ->
-                                                productLink = product.resolvedUrl
-                                                if (product.name.isNotBlank()) productName = product.name
-                                                if (product.facts.isNotBlank()) productFacts = product.facts
-                                                extractionStatus = if (product.retrievalNote.isBlank()) {
-                                                    "Product details extracted. Check them before generating."
+                                                applyProductDetails(product)
+                                                if (product.requiresBrowserReview) {
+                                                    browserUrl = product.resolvedUrl
+                                                    browserMessage = "Only general TikTok information was available. Open the product card or yellow basket, then tap Use this page."
+                                                    extractionStatus = "More product details are needed. Opening the page on this phone..."
+                                                    showProductBrowser = true
                                                 } else {
-                                                    "Extracted with note: ${product.retrievalNote}"
+                                                    extractionStatus = "Product details extracted from ${product.sourceLabel}. Check every field below."
                                                 }
                                             }.onFailure { failure ->
                                                 if (failure is ProductAccessBlockedException) {
@@ -460,6 +514,23 @@ private fun CreateScreen(
                             Text(if (imageBase64 == null) "Screenshot" else "Replace image")
                         }
                     }
+                    OutlinedButton(
+                        onClick = {
+                            val extractedUrl = ProductLinkResolver.extractUrl(productLink)
+                            if (extractedUrl != null) {
+                                browserUrl = extractedUrl
+                                browserMessage = "Open the exact product card, then tap Use this page."
+                                showProductBrowser = true
+                                errorMessage = ""
+                            } else {
+                                errorMessage = "Enter a complete product link beginning with https://"
+                            }
+                        },
+                        enabled = !isExtracting && !isReadingImage,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Open product page on this phone")
+                    }
                     if (isExtracting || isReadingImage) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             CircularProgressIndicator(Modifier.width(22.dp))
@@ -478,35 +549,53 @@ private fun CreateScreen(
             }
         }
 
-        item {
-            OutlinedTextField(
-                value = productName,
-                onValueChange = { productName = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = {
-                    Text(if (mode == InputMode.AFFILIATE) "Product name" else "Topic or content idea")
-                },
-                singleLine = true
-            )
+        if (mode == InputMode.AFFILIATE) {
+            item {
+                ProductVerificationFields(
+                    productName = productName,
+                    onProductNameChanged = { productName = it; verifiedByUser = false },
+                    price = productPrice,
+                    onPriceChanged = { productPrice = it; verifiedByUser = false },
+                    seller = productSeller,
+                    onSellerChanged = { productSeller = it; verifiedByUser = false },
+                    promotion = productPromotion,
+                    onPromotionChanged = { productPromotion = it; verifiedByUser = false },
+                    description = productDescription,
+                    onDescriptionChanged = { productDescription = it; verifiedByUser = false },
+                    features = productFeatures,
+                    onFeaturesChanged = { productFeatures = it; verifiedByUser = false },
+                    additionalFacts = productFacts,
+                    onAdditionalFactsChanged = { productFacts = it; verifiedByUser = false },
+                    source = extractionSource,
+                    confidence = extractionConfidence,
+                    warning = extractionWarning,
+                    verifiedByUser = verifiedByUser,
+                    onVerifiedChanged = { verifiedByUser = it }
+                )
+            }
+        } else {
+            item {
+                OutlinedTextField(
+                    value = productName,
+                    onValueChange = { productName = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Topic or content idea") },
+                    singleLine = true
+                )
+            }
+            item {
+                OutlinedTextField(
+                    value = productFacts,
+                    onValueChange = { productFacts = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Notes") },
+                    minLines = 4
+                )
+            }
         }
 
         item {
-            OutlinedTextField(
-                value = productFacts,
-                onValueChange = { productFacts = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = {
-                    Text(if (mode == InputMode.AFFILIATE) "Verified product facts" else "Notes")
-                },
-                placeholder = {
-                    Text("Features, price, material, size, promotion, or facts to include")
-                },
-                minLines = 4
-            )
-        }
-
-        item {
-            SectionTitle("2. Content settings")
+            SectionTitle(if (mode == InputMode.AFFILIATE) "3. Content settings" else "2. Content settings")
             Text("Platform", style = MaterialTheme.typography.labelLarge)
             ChoiceRow(
                 options = Platform.entries,
@@ -581,11 +670,45 @@ private fun CreateScreen(
                             errorMessage = "Add a product name, product facts, topic, or screenshot."
                         }
                         else -> {
+                            val verifiedFacts = if (mode == InputMode.AFFILIATE) {
+                                buildString {
+                                    fun appendField(label: String, value: String) {
+                                        if (value.isNotBlank()) append(label).append(": ").append(value.trim()).append('\n')
+                                    }
+                                    appendField("Price", productPrice)
+                                    appendField("Seller", productSeller)
+                                    appendField("Promotion", productPromotion)
+                                    appendField("Description", productDescription)
+                                    if (productFeatures.isNotBlank()) {
+                                        append("Features:\n")
+                                        productFeatures.lineSequence()
+                                            .map { it.trim().removePrefix("-").trim() }
+                                            .filter { it.isNotBlank() }
+                                            .forEach { append("- ").append(it).append('\n') }
+                                    }
+                                    if (productFacts.isNotBlank()) {
+                                        append("Additional facts:\n").append(productFacts.trim()).append('\n')
+                                    }
+                                }.trim()
+                            } else {
+                                productFacts
+                            }
+                            val verificationSummary = if (mode == InputMode.AFFILIATE) {
+                                buildList {
+                                    if (extractionSource.isNotBlank()) add("Extracted from $extractionSource")
+                                    extractionConfidence?.let { add(it.label) }
+                                    add(if (verifiedByUser) "Confirmed by the user" else "Not yet confirmed by the user")
+                                    if (extractionWarning.isNotBlank()) add("Warning: $extractionWarning")
+                                }.joinToString(". ")
+                            } else {
+                                ""
+                            }
                             val request = ContentRequest(
                                 mode = mode,
                                 productLink = productLink,
                                 productName = productName,
-                                productFacts = productFacts,
+                                productFacts = verifiedFacts,
+                                verificationSummary = verificationSummary,
                                 platform = platform,
                                 durationSeconds = duration,
                                 language = language,
@@ -670,6 +793,120 @@ private fun CreateScreen(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ProductVerificationFields(
+    productName: String,
+    onProductNameChanged: (String) -> Unit,
+    price: String,
+    onPriceChanged: (String) -> Unit,
+    seller: String,
+    onSellerChanged: (String) -> Unit,
+    promotion: String,
+    onPromotionChanged: (String) -> Unit,
+    description: String,
+    onDescriptionChanged: (String) -> Unit,
+    features: String,
+    onFeaturesChanged: (String) -> Unit,
+    additionalFacts: String,
+    onAdditionalFactsChanged: (String) -> Unit,
+    source: String,
+    confidence: ExtractionConfidence?,
+    warning: String,
+    verifiedByUser: Boolean,
+    onVerifiedChanged: (Boolean) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SectionTitle("2. Check product details")
+        if (source.isNotBlank() || confidence != null) {
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(confidence?.label ?: "Extraction completed", fontWeight = FontWeight.Bold)
+                    if (source.isNotBlank()) Text("Source: $source", style = MaterialTheme.typography.bodySmall)
+                    if (warning.isNotBlank()) {
+                        Text(
+                            "Check: $warning",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
+        }
+
+        OutlinedTextField(
+            value = productName,
+            onValueChange = onProductNameChanged,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Product name") },
+            singleLine = true
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            OutlinedTextField(
+                value = price,
+                onValueChange = onPriceChanged,
+                modifier = Modifier.weight(1f),
+                label = { Text("Price") },
+                placeholder = { Text("RM") },
+                singleLine = true
+            )
+            OutlinedTextField(
+                value = seller,
+                onValueChange = onSellerChanged,
+                modifier = Modifier.weight(1f),
+                label = { Text("Seller") },
+                singleLine = true
+            )
+        }
+        OutlinedTextField(
+            value = promotion,
+            onValueChange = onPromotionChanged,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Promotion") },
+            placeholder = { Text("Leave blank if not shown") },
+            singleLine = true
+        )
+        OutlinedTextField(
+            value = description,
+            onValueChange = onDescriptionChanged,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Description") },
+            minLines = 2
+        )
+        OutlinedTextField(
+            value = features,
+            onValueChange = onFeaturesChanged,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Verified features") },
+            supportingText = { Text("Use one feature per line") },
+            minLines = 3
+        )
+        OutlinedTextField(
+            value = additionalFacts,
+            onValueChange = onAdditionalFactsChanged,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Additional verified facts, optional") },
+            minLines = 2
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Checkbox(checked = verifiedByUser, onCheckedChange = onVerifiedChanged)
+            Text("I checked the product name, price and claims shown above")
         }
     }
 }
@@ -825,11 +1062,22 @@ private val PAGE_CAPTURE_SCRIPT = """
           meta[key] = value;
         }
       });
+      const jsonLd = [];
+      document.querySelectorAll('script[type="application/ld+json"]').forEach(function(item) {
+        if (item.textContent) jsonLd.push(item.textContent.slice(0, 12000));
+      });
+      const productText = [];
+      document.querySelectorAll('[class*="product" i], [data-testid*="product" i], [class*="price" i], [data-testid*="price" i]').forEach(function(item) {
+        const text = item.innerText || item.textContent || '';
+        if (text.trim()) productText.push(text.trim().slice(0, 1500));
+      });
       return JSON.stringify({
         url: location.href,
         title: document.title || '',
         metadata: meta,
-        visibleText: (document.body && document.body.innerText ? document.body.innerText : '').slice(0, 18000)
+        structuredData: jsonLd.slice(0, 8),
+        productElements: productText.slice(0, 40),
+        visibleText: (document.body && document.body.innerText ? document.body.innerText : '').slice(0, 24000)
       });
     })();
 """.trimIndent()
@@ -1013,7 +1261,7 @@ private fun SettingsScreen(
             "Open Google AI Studio in your browser, create a Gemini API key, then paste it above. SmartAgent sends product information only when you tap Generate."
         )
         Text(
-            "SmartAgent 0.3.1  |  Personal build",
+            "SmartAgent 0.4.0  |  Personal build",
             style = MaterialTheme.typography.bodySmall
         )
     }

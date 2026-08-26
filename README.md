@@ -2,11 +2,15 @@
 
 SmartAgent is a private Android content assistant for Malaysian creators. It converts a product, screenshot, or content idea into a publish-ready content pack for TikTok, Facebook, Threads, or WhatsApp.
 
-## Current personal build
+## Current personal build 0.4.0
 
 - Affiliate and organic content modes
 - Product link input through paste or Android Share
 - Layered product extraction using public page metadata, TikTok oEmbed, Gemini URL Context, and an on-phone browser fallback
+- Structured product verification for name, price, seller, promotion, description, and features
+- Extraction source, confidence guidance, warnings, and an explicit user-check confirmation
+- Automatic screenshot-to-product extraction with Gemini image understanding
+- Product JSON-LD reading before generic page metadata
 - Shopee and TikTok short-link redirect resolution
 - Product screenshot input with Gemini image understanding
 - Bahasa Melayu Malaysia and British English output
@@ -25,13 +29,16 @@ The app has no SmartAgent account, analytics, advertisement SDK, remote database
 
 ## Extract a TikTok or Shopee product
 
-1. Paste or share the product link into SmartAgent.
+1. Paste or share the product link into SmartAgent. Shared text containing a link is supported.
 2. Tap **Extract product**.
 3. SmartAgent first tries public metadata without opening a browser.
 4. If the page blocks that request, SmartAgent opens a private in-app browser.
 5. Wait for the page to load. On TikTok, open the product card or yellow basket if it is shown.
-6. Tap **Use this page** to fill the product name and verified facts.
-7. Check the extracted facts before generating content, especially price and promotions.
+6. Tap **Use this page** to fill the structured product fields.
+7. Check the product name, price, seller, promotion, description, and features.
+8. Select the confirmation box only after checking the displayed claims.
+
+If link access is blocked, choose **Screenshot**. SmartAgent reads the screenshot immediately and fills the same editable verification fields.
 
 ## Build the APK with GitHub
 

@@ -1,4 +1,4 @@
-SmartAgent 0.3.1 layered product extraction build
+SmartAgent 0.4.0 structured product verification build
 
 Compose BOM: 2025.08.00
 Activity Compose: 1.11.0
@@ -11,3 +11,6 @@ It adds TikTok oEmbed and public Open Graph metadata extraction.
 If a shop blocks server access, it opens a secure in-app browser and captures the rendered page after the user taps Use this page.
 Generation remains grounded with the product URL and user-verified facts.
 The default Gemini model is updated to gemini-3.5-flash-lite, including automatic migration from the old saved model.
+This version also reads Product JSON-LD, extracts shared links from surrounding text,
+turns screenshots into editable product fields, shows the extraction source and
+confidence guidance, and asks the user to confirm product facts before generation.

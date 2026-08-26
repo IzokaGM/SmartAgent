@@ -29,7 +29,8 @@ class GeminiClient {
             parts = parts,
             temperature = 0.75,
             maxOutputTokens = 4096,
-            enableUrlContext = !productUrl.isNullOrBlank()
+            enableUrlContext = !productUrl.isNullOrBlank(),
+            responseSchema = null
         )
         execute(apiKey, model, body).text
     }
@@ -59,6 +60,7 @@ class GeminiClient {
               "features": ["verified feature"],
               "seller": "seller or shop name if shown, otherwise empty string",
               "promotion": "promotion if shown, otherwise empty string",
+              "image_url": "product image URL if supplied, otherwise empty string",
               "warning": "what could not be verified, otherwise empty string"
             }
             """.trimIndent()
@@ -70,7 +72,8 @@ class GeminiClient {
             parts = JSONArray().put(JSONObject().put("text", prompt)),
             temperature = 0.1,
             maxOutputTokens = 1400,
-            enableUrlContext = suppliedMetadata.isBlank()
+            enableUrlContext = suppliedMetadata.isBlank(),
+            responseSchema = productResponseSchema()
         )
         val response = execute(apiKey, model, body)
         if (suppliedMetadata.isBlank() && !hasSuccessfulUrlRetrieval(response.candidate)) {
@@ -80,23 +83,26 @@ class GeminiClient {
         }
 
         val productJson = extractJsonObject(response.text)
-        val name = productJson.optString("name").trim()
-        val facts = buildFacts(productJson)
-        if (name.isBlank() && facts.isBlank()) {
+        if (!hasUsefulDetails(productJson)) {
             throw ProductAccessBlockedException(
                 "No product details were visible through server access. Open the page on this phone."
             )
         }
 
-        ProductDetails(
-            name = name,
-            facts = facts,
+        val metadataIsProductSpecific = publicMetadata?.isProductSpecific == true
+        val confidence = when {
+            metadataIsProductSpecific && productJson.optString("price").isNotBlank() -> ExtractionConfidence.HIGH
+            metadataIsProductSpecific -> ExtractionConfidence.MEDIUM
+            suppliedMetadata.isNotBlank() -> ExtractionConfidence.LOW
+            else -> ExtractionConfidence.MEDIUM
+        }
+        val requiresBrowserReview = publicMetadata != null && !publicMetadata.isProductSpecific
+        productDetailsFromJson(
+            json = productJson,
             resolvedUrl = resolvedUrl,
-            retrievalNote = buildList {
-                publicMetadata?.sourceLabel?.let { add("Used $it") }
-                val warning = productJson.optString("warning").trim()
-                if (warning.isNotBlank()) add(warning)
-            }.joinToString(". ")
+            sourceLabel = publicMetadata?.sourceLabel ?: "Gemini URL retrieval",
+            confidence = confidence,
+            requiresBrowserReview = requiresBrowserReview
         )
     }
 
@@ -122,23 +128,64 @@ class GeminiClient {
             parts = JSONArray().put(JSONObject().put("text", prompt)),
             temperature = 0.1,
             maxOutputTokens = 1400,
-            enableUrlContext = false
+            enableUrlContext = false,
+            responseSchema = productResponseSchema()
         )
         val productJson = extractJsonObject(execute(apiKey, model, body).text)
-        val name = productJson.optString("name").trim()
-        val facts = buildFacts(productJson)
-        if (name.isBlank() && facts.isBlank()) {
+        if (!hasUsefulDetails(productJson)) {
             error("No product details were visible. Open the product card in the browser, then capture again.")
         }
-        ProductDetails(
-            name = name,
-            facts = facts,
+        productDetailsFromJson(
+            json = productJson,
             resolvedUrl = productUrl,
-            retrievalNote = buildList {
-                add("Captured from the page on this phone")
-                val warning = productJson.optString("warning").trim()
-                if (warning.isNotBlank()) add(warning)
-            }.joinToString(". ")
+            sourceLabel = "page captured on this phone",
+            confidence = if (productJson.optString("price").isNotBlank()) {
+                ExtractionConfidence.HIGH
+            } else {
+                ExtractionConfidence.MEDIUM
+            },
+            requiresBrowserReview = false
+        )
+    }
+
+    fun extractProductFromImage(
+        apiKey: String,
+        model: String,
+        imageBase64: String,
+        productUrl: String = ""
+    ): Result<ProductDetails> = runCatching {
+        require(imageBase64.isNotBlank()) { "Choose a product screenshot first." }
+        val prompt = extractionPrompt(
+            productUrl,
+            "Read the attached product screenshot. Use only text and product details clearly visible in the image."
+        )
+        val parts = JSONArray()
+            .put(JSONObject().put("text", prompt))
+            .put(
+                JSONObject().put(
+                    "inline_data",
+                    JSONObject()
+                        .put("mime_type", "image/jpeg")
+                        .put("data", imageBase64)
+                )
+            )
+        val body = createBody(
+            parts = parts,
+            temperature = 0.1,
+            maxOutputTokens = 1400,
+            enableUrlContext = false,
+            responseSchema = productResponseSchema()
+        )
+        val productJson = extractJsonObject(execute(apiKey, model, body).text)
+        if (!hasUsefulDetails(productJson)) {
+            error("No product details were readable in this screenshot. Try a clearer screenshot showing the product card.")
+        }
+        productDetailsFromJson(
+            json = productJson,
+            resolvedUrl = productUrl,
+            sourceLabel = "product screenshot",
+            confidence = ExtractionConfidence.MEDIUM,
+            requiresBrowserReview = false
         )
     }
 
@@ -157,6 +204,7 @@ class GeminiClient {
           "features": ["verified feature"],
           "seller": "seller or shop name if shown, otherwise empty string",
           "promotion": "promotion if shown, otherwise empty string",
+          "image_url": "product image URL if explicitly supplied, otherwise empty string",
           "warning": "what could not be verified, otherwise empty string"
         }
     """.trimIndent()
@@ -165,7 +213,8 @@ class GeminiClient {
         parts: JSONArray,
         temperature: Double,
         maxOutputTokens: Int,
-        enableUrlContext: Boolean
+        enableUrlContext: Boolean,
+        responseSchema: JSONObject?
     ): JSONObject = JSONObject()
         .put(
             "contents",
@@ -180,6 +229,12 @@ class GeminiClient {
             JSONObject()
                 .put("temperature", temperature)
                 .put("maxOutputTokens", maxOutputTokens)
+                .apply {
+                    if (responseSchema != null) {
+                        put("responseMimeType", "application/json")
+                        put("responseSchema", responseSchema)
+                    }
+                }
         )
         .apply {
             if (enableUrlContext) {
@@ -269,25 +324,73 @@ class GeminiClient {
         return JSONObject(text.substring(first, last + 1))
     }
 
-    private fun buildFacts(json: JSONObject): String = buildString {
-        appendFact("Price", json.optString("price"))
-        appendFact("Description", json.optString("description"))
-        val features = json.optJSONArray("features")
-        if (features != null && features.length() > 0) {
-            append("Features:\n")
-            for (index in 0 until features.length()) {
-                val feature = features.optString(index).trim()
-                if (feature.isNotBlank()) append("- ").append(feature).append('\n')
+    private fun productDetailsFromJson(
+        json: JSONObject,
+        resolvedUrl: String,
+        sourceLabel: String,
+        confidence: ExtractionConfidence,
+        requiresBrowserReview: Boolean
+    ): ProductDetails {
+        val features = buildList {
+            val array = json.optJSONArray("features")
+            if (array != null) {
+                for (index in 0 until array.length()) {
+                    array.optString(index).trim().takeIf { it.isNotBlank() }?.let(::add)
+                }
             }
         }
-        appendFact("Seller", json.optString("seller"))
-        appendFact("Promotion", json.optString("promotion"))
-    }.trim()
-
-    private fun StringBuilder.appendFact(label: String, value: String) {
-        val clean = value.trim()
-        if (clean.isNotBlank()) append(label).append(": ").append(clean).append('\n')
+        return ProductDetails(
+            name = json.optString("name").trim(),
+            price = json.optString("price").trim(),
+            description = json.optString("description").trim(),
+            features = features,
+            seller = json.optString("seller").trim(),
+            promotion = json.optString("promotion").trim(),
+            imageUrl = json.optString("image_url").trim(),
+            resolvedUrl = resolvedUrl,
+            sourceLabel = sourceLabel,
+            confidence = confidence,
+            warning = json.optString("warning").trim(),
+            requiresBrowserReview = requiresBrowserReview
+        )
     }
+
+    private fun hasUsefulDetails(json: JSONObject): Boolean = listOf(
+        "name", "price", "description", "seller", "promotion"
+    ).any { json.optString(it).isNotBlank() } ||
+        (json.optJSONArray("features")?.length() ?: 0) > 0
+
+    private fun productResponseSchema(): JSONObject = JSONObject()
+        .put("type", "OBJECT")
+        .put(
+            "properties",
+            JSONObject()
+                .put("name", JSONObject().put("type", "STRING"))
+                .put("price", JSONObject().put("type", "STRING"))
+                .put("description", JSONObject().put("type", "STRING"))
+                .put(
+                    "features",
+                    JSONObject()
+                        .put("type", "ARRAY")
+                        .put("items", JSONObject().put("type", "STRING"))
+                )
+                .put("seller", JSONObject().put("type", "STRING"))
+                .put("promotion", JSONObject().put("type", "STRING"))
+                .put("image_url", JSONObject().put("type", "STRING"))
+                .put("warning", JSONObject().put("type", "STRING"))
+        )
+        .put(
+            "required",
+            JSONArray()
+                .put("name")
+                .put("price")
+                .put("description")
+                .put("features")
+                .put("seller")
+                .put("promotion")
+                .put("image_url")
+                .put("warning")
+        )
 
     private data class GeminiResponse(
         val text: String,
@@ -295,6 +398,6 @@ class GeminiClient {
     )
 
     private companion object {
-        const val MAX_CAPTURE_CHARS = 18_000
+        const val MAX_CAPTURE_CHARS = 36_000
     }
 }

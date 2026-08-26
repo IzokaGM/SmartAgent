@@ -13,6 +13,8 @@ object PromptBuilder {
             Product link: ${request.productLink.ifBlank { "Not supplied" }}
             Verified product facts supplied by the user:
             ${request.productFacts.ifBlank { "No verified facts supplied" }}
+            Verification status:
+            ${request.verificationSummary.ifBlank { "No extraction verification recorded" }}
             ${if (request.hasScreenshot) "A product screenshot is attached. Extract only clearly visible facts from it." else "No screenshot is attached."}
             """.trimIndent()
         } else {
@@ -38,10 +40,11 @@ object PromptBuilder {
 
             Accuracy rules:
             1. Never invent a price, discount, specification, rating, testimonial, benefit or product feature.
-            2. Clearly mark any missing information that the creator should verify.
-            3. Do not make unsupported medical, financial or guaranteed-result claims.
-            4. Keep the spoken script realistic for the selected duration.
-            5. Make the hook interesting without misleading viewers.
+            2. Treat the editable verified fields above as the source of truth. Do not replace them with conflicting page text.
+            3. Clearly mark any missing information that the creator should verify.
+            4. Do not make unsupported medical, financial or guaranteed-result claims.
+            5. Keep the spoken script realistic for the selected duration.
+            6. Make the hook interesting without misleading viewers.
 
             Return exactly these sections:
 
