@@ -1,0 +1,13 @@
+SmartAgent 0.3.1 layered product extraction build
+
+Compose BOM: 2025.08.00
+Activity Compose: 1.11.0
+Android Gradle Plugin: 8.13.0
+Compile SDK: 36
+
+This package replaces the earlier archive that used Compose BOM 2026.08.00.
+It also removes the invalid direct import of Compose's internal weight property.
+It adds TikTok oEmbed and public Open Graph metadata extraction.
+If a shop blocks server access, it opens a secure in-app browser and captures the rendered page after the user taps Use this page.
+Generation remains grounded with the product URL and user-verified facts.
+The default Gemini model is updated to gemini-3.5-flash-lite, including automatic migration from the old saved model.
