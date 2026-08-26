@@ -7,6 +7,8 @@ enum class InputMode(val label: String) {
 
 enum class Platform(val label: String) {
     TIKTOK("TikTok"),
+    SHOPEE_VIDEO("Shopee Video"),
+    INSTAGRAM_REELS("Instagram Reels"),
     FACEBOOK("Facebook"),
     THREADS("Threads"),
     WHATSAPP("WhatsApp")
@@ -20,10 +22,17 @@ enum class OutputLanguage(val label: String) {
 enum class ContentStyle(val label: String) {
     UGC("UGC natural"),
     SOFT_SELL("Soft sell"),
+    HARD_SELL("Hard sell"),
     STORY("Storytelling"),
     HONEST_REVIEW("Honest review"),
     FACELESS("Faceless video"),
-    PROBLEM_SOLUTION("Problem solution")
+    PROBLEM_SOLUTION("Problem solution"),
+    EDUCATIONAL("Educational"),
+    POV("POV"),
+    COMPARISON("Comparison"),
+    MYTH_BUSTER("Myth buster"),
+    DEMO("Product demo"),
+    TESTIMONIAL("Testimonial style")
 }
 
 data class ContentRequest(
@@ -37,8 +46,61 @@ data class ContentRequest(
     val language: OutputLanguage = OutputLanguage.MALAY,
     val style: ContentStyle = ContentStyle.UGC,
     val audience: String = "",
+    val variantCount: Int = 1,
     val hasScreenshot: Boolean = false
 )
+
+enum class ContentSection(val label: String) {
+    TITLE("Title"),
+    HOOKS("Hook options"),
+    STORYBOARD("Storyboard"),
+    VOICE_OVER("Full voice-over"),
+    CAPTION("Caption"),
+    HASHTAGS("Hashtags"),
+    PINNED_COMMENT("Pinned comment"),
+    CHECKLIST("Creator checklist")
+}
+
+data class ContentPack(
+    val title: String,
+    val hooks: String,
+    val storyboard: String,
+    val voiceOver: String,
+    val caption: String,
+    val hashtags: String,
+    val pinnedComment: String,
+    val checklist: String
+) {
+    fun contentFor(section: ContentSection): String = when (section) {
+        ContentSection.TITLE -> title
+        ContentSection.HOOKS -> hooks
+        ContentSection.STORYBOARD -> storyboard
+        ContentSection.VOICE_OVER -> voiceOver
+        ContentSection.CAPTION -> caption
+        ContentSection.HASHTAGS -> hashtags
+        ContentSection.PINNED_COMMENT -> pinnedComment
+        ContentSection.CHECKLIST -> checklist
+    }
+
+    fun replace(section: ContentSection, content: String): ContentPack = when (section) {
+        ContentSection.TITLE -> copy(title = content)
+        ContentSection.HOOKS -> copy(hooks = content)
+        ContentSection.STORYBOARD -> copy(storyboard = content)
+        ContentSection.VOICE_OVER -> copy(voiceOver = content)
+        ContentSection.CAPTION -> copy(caption = content)
+        ContentSection.HASHTAGS -> copy(hashtags = content)
+        ContentSection.PINNED_COMMENT -> copy(pinnedComment = content)
+        ContentSection.CHECKLIST -> copy(checklist = content)
+    }
+
+    fun asPlainText(): String = ContentSection.entries.joinToString("\n\n") { section ->
+        "${section.label.uppercase()}\n${contentFor(section)}"
+    }
+}
+
+fun List<ContentPack>.asVariantText(): String = mapIndexed { index, pack ->
+    "ALTERNATIVE ${index + 1}\n\n${pack.asPlainText()}"
+}.joinToString("\n\n====================\n\n")
 
 data class GenerationRecord(
     val id: Long,

@@ -2,7 +2,7 @@
 
 SmartAgent is a private Android content assistant for Malaysian creators. It converts a product, screenshot, or content idea into a publish-ready content pack for TikTok, Facebook, Threads, or WhatsApp.
 
-## Current personal build 0.4.0
+## Current personal build 0.5.0
 
 - Affiliate and organic content modes
 - Product link input through paste or Android Share
@@ -14,7 +14,7 @@ SmartAgent is a private Android content assistant for Malaysian creators. It con
 - Shopee and TikTok short-link redirect resolution
 - Product screenshot input with Gemini image understanding
 - Bahasa Melayu Malaysia and British English output
-- TikTok, Facebook, Threads, and WhatsApp formats
+- TikTok, Shopee Video, Instagram Reels, Facebook, Threads, and WhatsApp formats
 - 10, 15, 30, 60, and 120 second durations
 - UGC, soft sell, storytelling, honest review, faceless, and problem solution styles
 - Three hooks, a timed storyboard, full voice-over, caption, hashtags, pinned comment, and creator checklist
@@ -22,6 +22,12 @@ SmartAgent is a private Android content assistant for Malaysian creators. It con
 - Local history for the latest 50 generations
 - Copy and Android Share actions
 - Light and dark themes
+- One or three complete creative alternatives per generation
+- Structured result cards for title, hooks, storyboard, voice-over, caption, hashtags, pinned comment, and checklist
+- Copy and regenerate controls for every individual content section
+- Duration-aware voice-over word targets
+- TikTok, Shopee Video, Instagram Reels, Facebook, Threads, and WhatsApp output
+- Thirteen content styles including UGC, demo, testimonial, comparison, POV, and myth buster
 
 ## Privacy model
 
@@ -73,8 +79,7 @@ The GitHub workflow builds the debug APK automatically. No Gemini API key is sto
 
 ## Planned next improvements
 
-- Editable structured product preview before generation
-- Section-level regeneration
 - Saved brand voice profiles
-- Separate caption, hook, and storyboard copy buttons
 - Optional content calendar
+- Search and favourites in history
+- Release signing and automated device tests

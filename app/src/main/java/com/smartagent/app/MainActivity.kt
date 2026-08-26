@@ -73,6 +73,8 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.smartagent.app.data.ContentRequest
+import com.smartagent.app.data.ContentPack
+import com.smartagent.app.data.ContentSection
 import com.smartagent.app.data.ContentStyle
 import com.smartagent.app.data.ExtractionConfidence
 import com.smartagent.app.data.GenerationRecord
@@ -87,6 +89,7 @@ import com.smartagent.app.data.ProductDetails
 import com.smartagent.app.data.ProductLinkResolver
 import com.smartagent.app.data.PromptBuilder
 import com.smartagent.app.data.SecureKeyStore
+import com.smartagent.app.data.asVariantText
 import com.smartagent.app.ui.theme.SmartAgentTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -228,7 +231,6 @@ private fun CreateScreen(
     onRecordCreated: (GenerationRecord) -> Unit
 ) {
     val context = LocalContext.current
-    val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
 
     var mode by rememberSaveable { mutableStateOf(InputMode.AFFILIATE) }
@@ -249,6 +251,7 @@ private fun CreateScreen(
     var language by rememberSaveable { mutableStateOf(OutputLanguage.MALAY) }
     var style by rememberSaveable { mutableStateOf(ContentStyle.UGC) }
     var audience by rememberSaveable { mutableStateOf("") }
+    var variantCount by rememberSaveable { mutableStateOf(1) }
     var imageBase64 by remember { mutableStateOf<String?>(null) }
     var imageStatus by rememberSaveable { mutableStateOf("No screenshot selected") }
     var isReadingImage by remember { mutableStateOf(false) }
@@ -259,7 +262,11 @@ private fun CreateScreen(
     var showProductBrowser by remember { mutableStateOf(false) }
     var isProcessingCapture by remember { mutableStateOf(false) }
     var isGenerating by remember { mutableStateOf(false) }
-    var output by rememberSaveable { mutableStateOf("") }
+    var output by remember { mutableStateOf<List<ContentPack>>(emptyList()) }
+    var selectedVariant by rememberSaveable { mutableStateOf(0) }
+    var currentRequest by remember { mutableStateOf<ContentRequest?>(null) }
+    var currentRecordId by remember { mutableStateOf<Long?>(null) }
+    var regeneratingSection by remember { mutableStateOf<ContentSection?>(null) }
     var errorMessage by rememberSaveable { mutableStateOf("") }
 
     LaunchedEffect(incomingText) {
@@ -627,6 +634,14 @@ private fun CreateScreen(
                 label = { it.label },
                 onSelected = { style = it }
             )
+            Spacer(Modifier.height(10.dp))
+            Text("Alternatives", style = MaterialTheme.typography.labelLarge)
+            ChoiceRow(
+                options = listOf(1, 3),
+                selected = variantCount,
+                label = { if (it == 1) "1 pack" else "3 alternatives" },
+                onSelected = { variantCount = it }
+            )
         }
 
         item {
@@ -714,16 +729,20 @@ private fun CreateScreen(
                                 language = language,
                                 style = style,
                                 audience = audience,
+                                variantCount = variantCount,
                                 hasScreenshot = imageBase64 != null
                             )
                             isGenerating = true
-                            output = ""
+                            output = emptyList()
+                            selectedVariant = 0
+                            currentRequest = request
                             scope.launch {
                                 val response = withContext(Dispatchers.IO) {
                                     geminiClient.generate(
                                         apiKey = key,
                                         model = repository.loadModel(),
                                         prompt = PromptBuilder.build(request),
+                                        variantCount = request.variantCount,
                                         imageBase64 = imageBase64,
                                         productUrl = productLink.takeIf {
                                             mode == InputMode.AFFILIATE && it.isNotBlank()
@@ -733,13 +752,14 @@ private fun CreateScreen(
                                 response.onSuccess { generated ->
                                     output = generated
                                     val now = System.currentTimeMillis()
+                                    currentRecordId = now
                                     onRecordCreated(
                                         GenerationRecord(
                                             id = now,
                                             createdAt = now,
                                             title = productName.ifBlank { "Untitled content" },
                                             platform = platform.label,
-                                            result = generated
+                                            result = generated.asVariantText()
                                         )
                                     )
                                 }.onFailure {
@@ -768,29 +788,137 @@ private fun CreateScreen(
             }
         }
 
-        if (output.isNotBlank()) {
+        if (output.isNotEmpty()) {
             item {
-                SectionTitle("Your content pack")
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = {
-                        clipboard.setText(AnnotatedString(output))
-                    }) { Text("Copy all") }
-
-                    OutlinedButton(onClick = {
-                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                            type = "text/plain"
-                            putExtra(Intent.EXTRA_TEXT, output)
+                ContentPackResult(
+                    packs = output,
+                    selectedVariant = selectedVariant,
+                    onVariantSelected = { selectedVariant = it },
+                    regeneratingSection = regeneratingSection,
+                    onRegenerate = { section ->
+                        val key = secureKeyStore.loadApiKey()
+                        val request = currentRequest
+                        val variantIndex = selectedVariant
+                        val existingPack = output.getOrNull(variantIndex)
+                        if (key == null || request == null || existingPack == null) {
+                            errorMessage = "The current content settings are unavailable. Generate a new pack first."
+                        } else {
+                            errorMessage = ""
+                            regeneratingSection = section
+                            scope.launch {
+                                val response = withContext(Dispatchers.IO) {
+                                    geminiClient.regenerateSection(
+                                        apiKey = key,
+                                        model = repository.loadModel(),
+                                        prompt = PromptBuilder.buildSection(request, section, existingPack),
+                                        imageBase64 = imageBase64.takeIf { request.hasScreenshot },
+                                        productUrl = request.productLink.takeIf {
+                                            request.mode == InputMode.AFFILIATE && it.isNotBlank()
+                                        }
+                                    )
+                                }
+                                response.onSuccess { replacement ->
+                                    val updated = existingPack.replace(section, replacement)
+                                    val updatedPacks = output.toMutableList().also { packs ->
+                                        packs[variantIndex] = updated
+                                    }
+                                    output = updatedPacks
+                                    val recordId = currentRecordId ?: System.currentTimeMillis().also {
+                                        currentRecordId = it
+                                    }
+                                    onRecordCreated(
+                                        GenerationRecord(
+                                            id = recordId,
+                                            createdAt = System.currentTimeMillis(),
+                                            title = productName.ifBlank { "Untitled content" },
+                                            platform = platform.label,
+                                            result = updatedPacks.asVariantText()
+                                        )
+                                    )
+                                }.onFailure { failure ->
+                                    errorMessage = failure.message ?: "Section regeneration failed"
+                                }
+                                regeneratingSection = null
+                            }
                         }
-                        context.startActivity(Intent.createChooser(shareIntent, "Share content pack"))
-                    }) { Text("Share") }
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ContentPackResult(
+    packs: List<ContentPack>,
+    selectedVariant: Int,
+    onVariantSelected: (Int) -> Unit,
+    regeneratingSection: ContentSection?,
+    onRegenerate: (ContentSection) -> Unit
+) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val pack = packs.getOrElse(selectedVariant) { packs.first() }
+    val fullText = pack.asPlainText()
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SectionTitle("Your content pack")
+        if (packs.size > 1) {
+            ChoiceRow(
+                options = packs.indices.toList(),
+                selected = selectedVariant,
+                label = { "Alternative ${it + 1}" },
+                onSelected = onVariantSelected
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = {
+                clipboard.setText(AnnotatedString(fullText))
+            }) { Text("Copy all") }
+
+            OutlinedButton(onClick = {
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_TEXT, fullText)
                 }
-                Spacer(Modifier.height(10.dp))
-                Card {
-                    Text(
-                        output,
-                        modifier = Modifier.padding(16.dp),
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+                context.startActivity(Intent.createChooser(shareIntent, "Share content pack"))
+            }) { Text("Share") }
+        }
+        if (packs.size > 1) {
+            OutlinedButton(
+                onClick = { clipboard.setText(AnnotatedString(packs.asVariantText())) },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Copy all ${packs.size} alternatives")
+            }
+        }
+
+        ContentSection.entries.forEach { section ->
+            val content = pack.contentFor(section)
+            Card {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(section.label, fontWeight = FontWeight.Bold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = {
+                            clipboard.setText(AnnotatedString(content))
+                        }) { Text("Copy") }
+                        TextButton(
+                            onClick = { onRegenerate(section) },
+                            enabled = regeneratingSection == null
+                        ) {
+                            if (regeneratingSection == section) {
+                                CircularProgressIndicator(Modifier.width(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("Regenerating")
+                            } else {
+                                Text("Regenerate")
+                            }
+                        }
+                    }
+                    Text(content, style = MaterialTheme.typography.bodyMedium)
                 }
             }
         }
@@ -1261,7 +1389,7 @@ private fun SettingsScreen(
             "Open Google AI Studio in your browser, create a Gemini API key, then paste it above. SmartAgent sends product information only when you tap Generate."
         )
         Text(
-            "SmartAgent 0.4.0  |  Personal build",
+            "SmartAgent 0.5.0  |  Personal build",
             style = MaterialTheme.typography.bodySmall
         )
     }

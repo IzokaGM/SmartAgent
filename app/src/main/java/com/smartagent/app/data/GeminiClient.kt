@@ -10,9 +10,11 @@ class GeminiClient {
         apiKey: String,
         model: String,
         prompt: String,
+        variantCount: Int,
         imageBase64: String? = null,
         productUrl: String? = null
-    ): Result<String> = runCatching {
+    ): Result<List<ContentPack>> = runCatching {
+        require(variantCount == 1 || variantCount == 3) { "Variant count must be 1 or 3" }
         val parts = JSONArray().put(JSONObject().put("text", prompt))
         if (!imageBase64.isNullOrBlank()) {
             parts.put(
@@ -28,11 +30,52 @@ class GeminiClient {
         val body = createBody(
             parts = parts,
             temperature = 0.75,
-            maxOutputTokens = 4096,
+            maxOutputTokens = if (variantCount == 3) 12_000 else 4096,
             enableUrlContext = !productUrl.isNullOrBlank(),
-            responseSchema = null
+            responseSchema = contentPackSetResponseSchema()
         )
-        execute(apiKey, model, body).text
+        val json = extractJsonObject(execute(apiKey, model, body).text)
+        val variants = json.optJSONArray("variants") ?: error("Gemini returned no content alternatives")
+        buildList {
+            for (index in 0 until variants.length()) {
+                variants.optJSONObject(index)?.let { add(contentPackFromJson(it)) }
+            }
+        }.also { packs ->
+            require(packs.size == variantCount) {
+                "Gemini returned ${packs.size} alternatives instead of $variantCount"
+            }
+        }
+    }
+
+    fun regenerateSection(
+        apiKey: String,
+        model: String,
+        prompt: String,
+        imageBase64: String? = null,
+        productUrl: String? = null
+    ): Result<String> = runCatching {
+        val parts = JSONArray().put(JSONObject().put("text", prompt))
+        if (!imageBase64.isNullOrBlank()) {
+            parts.put(
+                JSONObject().put(
+                    "inline_data",
+                    JSONObject()
+                        .put("mime_type", "image/jpeg")
+                        .put("data", imageBase64)
+                )
+            )
+        }
+        val body = createBody(
+            parts = parts,
+            temperature = 0.8,
+            maxOutputTokens = 2200,
+            enableUrlContext = !productUrl.isNullOrBlank(),
+            responseSchema = sectionResponseSchema()
+        )
+        val json = extractJsonObject(execute(apiKey, model, body).text)
+        json.optString("content").trim().ifBlank {
+            error("Gemini returned an empty replacement section")
+        }
     }
 
     fun extractProduct(
@@ -320,7 +363,7 @@ class GeminiClient {
     private fun extractJsonObject(text: String): JSONObject {
         val first = text.indexOf('{')
         val last = text.lastIndexOf('}')
-        if (first < 0 || last <= first) error("Product details could not be understood")
+        if (first < 0 || last <= first) error("The AI response could not be understood")
         return JSONObject(text.substring(first, last + 1))
     }
 
@@ -391,6 +434,64 @@ class GeminiClient {
                 .put("image_url")
                 .put("warning")
         )
+
+    private fun contentPackFromJson(json: JSONObject): ContentPack = ContentPack(
+        title = json.optString("title").trim(),
+        hooks = json.optString("hooks").trim(),
+        storyboard = json.optString("storyboard").trim(),
+        voiceOver = json.optString("voice_over").trim(),
+        caption = json.optString("caption").trim(),
+        hashtags = json.optString("hashtags").trim(),
+        pinnedComment = json.optString("pinned_comment").trim(),
+        checklist = json.optString("checklist").trim()
+    ).also { pack ->
+        require(ContentSection.entries.all { pack.contentFor(it).isNotBlank() }) {
+            "Gemini returned an incomplete content pack"
+        }
+    }
+
+    private fun contentPackItemSchema(): JSONObject {
+        val properties = JSONObject()
+        val required = JSONArray()
+        listOf(
+            "title",
+            "hooks",
+            "storyboard",
+            "voice_over",
+            "caption",
+            "hashtags",
+            "pinned_comment",
+            "checklist"
+        ).forEach { key ->
+            properties.put(key, JSONObject().put("type", "STRING"))
+            required.put(key)
+        }
+        return JSONObject()
+            .put("type", "OBJECT")
+            .put("properties", properties)
+            .put("required", required)
+    }
+
+    private fun contentPackSetResponseSchema(): JSONObject = JSONObject()
+        .put("type", "OBJECT")
+        .put(
+            "properties",
+            JSONObject().put(
+                "variants",
+                JSONObject()
+                    .put("type", "ARRAY")
+                    .put("items", contentPackItemSchema())
+            )
+        )
+        .put("required", JSONArray().put("variants"))
+
+    private fun sectionResponseSchema(): JSONObject = JSONObject()
+        .put("type", "OBJECT")
+        .put(
+            "properties",
+            JSONObject().put("content", JSONObject().put("type", "STRING"))
+        )
+        .put("required", JSONArray().put("content"))
 
     private data class GeminiResponse(
         val text: String,
