@@ -2,7 +2,7 @@
 
 SmartAgent is a private Android content assistant for Malaysian creators. It converts a product, screenshot, or content idea into a publish-ready content pack for TikTok, Facebook, Threads, or WhatsApp.
 
-## Current personal build 0.5.0
+## Current personal build 0.6.0
 
 - Affiliate and organic content modes
 - Product link input through paste or Android Share
@@ -28,6 +28,8 @@ SmartAgent is a private Android content assistant for Malaysian creators. It con
 - Duration-aware voice-over word targets
 - TikTok, Shopee Video, Instagram Reels, Facebook, Threads, and WhatsApp output
 - Thirteen content styles including UGC, demo, testimonial, comparison, POV, and myth buster
+- Saved personal brand voice with tone, preferred call to action, phrases to use, and phrases to avoid
+- Per-result voice-over word counting with duration-fit guidance
 
 ## Privacy model
 
@@ -79,7 +81,7 @@ The GitHub workflow builds the debug APK automatically. No Gemini API key is sto
 
 ## Planned next improvements
 
-- Saved brand voice profiles
 - Optional content calendar
 - Search and favourites in history
+- Multiple named brand voice profiles
 - Release signing and automated device tests

@@ -33,6 +33,15 @@ object PromptBuilder {
             120 -> "260 to 300 words"
             else -> "a natural speaking length for ${request.durationSeconds} seconds"
         }
+        val brandVoiceInstruction = if (request.brandVoice.isConfigured()) {
+            """
+            Saved personal brand voice:
+            ${request.brandVoice.promptText()}
+            Follow this voice consistently unless it conflicts with accuracy or safety rules.
+            """.trimIndent()
+        } else {
+            "No saved personal brand voice is active."
+        }
 
         return """
             You are SmartAgent, a careful content assistant for Malaysian creators.
@@ -46,6 +55,8 @@ object PromptBuilder {
             Content style: ${request.style.label}
             Target audience: ${request.audience.ifBlank { "General Malaysian audience" }}
             $languageInstruction
+
+            $brandVoiceInstruction
 
             Accuracy rules:
             1. Never invent a price, discount, specification, rating, testimonial, benefit or product feature.
@@ -92,6 +103,7 @@ object PromptBuilder {
         Style: ${request.style.label}
         Audience: ${request.audience.ifBlank { "General Malaysian audience" }}
         $languageInstruction
+        Saved personal brand voice: ${request.brandVoice.promptText().ifBlank { "Not active" }}
 
         The creator already has the content pack below:
 

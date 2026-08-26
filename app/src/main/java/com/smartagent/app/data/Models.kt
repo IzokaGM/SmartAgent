@@ -47,8 +47,46 @@ data class ContentRequest(
     val style: ContentStyle = ContentStyle.UGC,
     val audience: String = "",
     val variantCount: Int = 1,
+    val brandVoice: BrandVoiceProfile = BrandVoiceProfile(),
     val hasScreenshot: Boolean = false
 )
+
+data class BrandVoiceProfile(
+    val name: String = "",
+    val tone: String = "",
+    val preferredCallToAction: String = "",
+    val phrasesToUse: String = "",
+    val phrasesToAvoid: String = ""
+) {
+    fun isConfigured(): Boolean = listOf(
+        name,
+        tone,
+        preferredCallToAction,
+        phrasesToUse,
+        phrasesToAvoid
+    ).any { it.isNotBlank() }
+
+    fun promptText(): String = listOf(
+        "Profile name" to name,
+        "Tone and personality" to tone,
+        "Preferred call to action" to preferredCallToAction,
+        "Phrases to use" to phrasesToUse,
+        "Phrases to avoid" to phrasesToAvoid
+    ).filter { (_, value) -> value.isNotBlank() }
+        .joinToString("\n") { (label, value) -> "$label: ${value.trim()}" }
+}
+
+fun recommendedVoiceOverWords(durationSeconds: Int): IntRange = when (durationSeconds) {
+    10 -> 20..28
+    15 -> 30..40
+    30 -> 65..80
+    60 -> 130..155
+    120 -> 260..300
+    else -> {
+        val centre = (durationSeconds * 2.3).toInt().coerceAtLeast(1)
+        (centre * 85 / 100)..(centre * 115 / 100)
+    }
+}
 
 enum class ContentSection(val label: String) {
     TITLE("Title"),

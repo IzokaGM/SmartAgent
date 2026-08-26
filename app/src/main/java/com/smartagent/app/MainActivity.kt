@@ -75,6 +75,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import com.smartagent.app.data.ContentRequest
 import com.smartagent.app.data.ContentPack
 import com.smartagent.app.data.ContentSection
+import com.smartagent.app.data.BrandVoiceProfile
 import com.smartagent.app.data.ContentStyle
 import com.smartagent.app.data.ExtractionConfidence
 import com.smartagent.app.data.GenerationRecord
@@ -90,6 +91,7 @@ import com.smartagent.app.data.ProductLinkResolver
 import com.smartagent.app.data.PromptBuilder
 import com.smartagent.app.data.SecureKeyStore
 import com.smartagent.app.data.asVariantText
+import com.smartagent.app.data.recommendedVoiceOverWords
 import com.smartagent.app.ui.theme.SmartAgentTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -232,6 +234,7 @@ private fun CreateScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val savedBrandVoice = remember { repository.loadBrandVoice() }
 
     var mode by rememberSaveable { mutableStateOf(InputMode.AFFILIATE) }
     var productLink by rememberSaveable { mutableStateOf("") }
@@ -252,6 +255,7 @@ private fun CreateScreen(
     var style by rememberSaveable { mutableStateOf(ContentStyle.UGC) }
     var audience by rememberSaveable { mutableStateOf("") }
     var variantCount by rememberSaveable { mutableStateOf(1) }
+    var useBrandVoice by rememberSaveable { mutableStateOf(savedBrandVoice.isConfigured()) }
     var imageBase64 by remember { mutableStateOf<String?>(null) }
     var imageStatus by rememberSaveable { mutableStateOf("No screenshot selected") }
     var isReadingImage by remember { mutableStateOf(false) }
@@ -642,6 +646,22 @@ private fun CreateScreen(
                 label = { if (it == 1) "1 pack" else "3 alternatives" },
                 onSelected = { variantCount = it }
             )
+            if (savedBrandVoice.isConfigured()) {
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(checked = useBrandVoice, onCheckedChange = { useBrandVoice = it })
+                    Column {
+                        Text("Use saved brand voice", fontWeight = FontWeight.Bold)
+                        Text(
+                            savedBrandVoice.name.ifBlank { "Personal profile" },
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
         }
 
         item {
@@ -730,6 +750,7 @@ private fun CreateScreen(
                                 style = style,
                                 audience = audience,
                                 variantCount = variantCount,
+                                brandVoice = if (useBrandVoice) savedBrandVoice else BrandVoiceProfile(),
                                 hasScreenshot = imageBase64 != null
                             )
                             isGenerating = true
@@ -794,6 +815,7 @@ private fun CreateScreen(
                     packs = output,
                     selectedVariant = selectedVariant,
                     onVariantSelected = { selectedVariant = it },
+                    durationSeconds = currentRequest?.durationSeconds ?: duration,
                     regeneratingSection = regeneratingSection,
                     onRegenerate = { section ->
                         val key = secureKeyStore.loadApiKey()
@@ -853,6 +875,7 @@ private fun ContentPackResult(
     packs: List<ContentPack>,
     selectedVariant: Int,
     onVariantSelected: (Int) -> Unit,
+    durationSeconds: Int,
     regeneratingSection: ContentSection?,
     onRegenerate: (ContentSection) -> Unit
 ) {
@@ -917,6 +940,21 @@ private fun ContentPackResult(
                                 Text("Regenerate")
                             }
                         }
+                    }
+                    if (section == ContentSection.VOICE_OVER) {
+                        val words = content.trim().split(Regex("\\s+")).count { it.isNotBlank() }
+                        val target = recommendedVoiceOverWords(durationSeconds)
+                        val fitsTarget = words in target
+                        Text(
+                            "$words words. Target for ${durationSeconds}s: ${target.first} to ${target.last} words.",
+                            color = if (fitsTarget) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                     Text(content, style = MaterialTheme.typography.bodyMedium)
                 }
@@ -1300,9 +1338,16 @@ private fun SettingsScreen(
     keyConfigured: Boolean,
     onKeyStateChanged: (Boolean) -> Unit
 ) {
+    val existingBrandVoice = remember { repository.loadBrandVoice() }
     var apiKey by rememberSaveable { mutableStateOf("") }
     var model by rememberSaveable { mutableStateOf(repository.loadModel()) }
     var message by rememberSaveable { mutableStateOf("") }
+    var brandName by rememberSaveable { mutableStateOf(existingBrandVoice.name) }
+    var brandTone by rememberSaveable { mutableStateOf(existingBrandVoice.tone) }
+    var brandCallToAction by rememberSaveable { mutableStateOf(existingBrandVoice.preferredCallToAction) }
+    var brandPhrasesToUse by rememberSaveable { mutableStateOf(existingBrandVoice.phrasesToUse) }
+    var brandPhrasesToAvoid by rememberSaveable { mutableStateOf(existingBrandVoice.phrasesToAvoid) }
+    var brandMessage by rememberSaveable { mutableStateOf("") }
 
     Column(
         modifier = Modifier
@@ -1384,12 +1429,98 @@ private fun SettingsScreen(
         }
 
         HorizontalDivider()
+        SectionTitle("Personal brand voice")
+        Text("SmartAgent will reuse this profile in new content packs when you enable it on the Create screen.")
+        OutlinedTextField(
+            value = brandName,
+            onValueChange = { brandName = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Profile name") },
+            placeholder = { Text("Example: My affiliate voice") },
+            singleLine = true
+        )
+        OutlinedTextField(
+            value = brandTone,
+            onValueChange = { brandTone = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Tone and personality") },
+            placeholder = { Text("Example: Friendly Malaysian UGC, direct and natural") },
+            minLines = 2
+        )
+        OutlinedTextField(
+            value = brandCallToAction,
+            onValueChange = { brandCallToAction = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Preferred call to action") },
+            placeholder = { Text("Example: Tekan bakul kuning untuk tengok harga") },
+            minLines = 2
+        )
+        OutlinedTextField(
+            value = brandPhrasesToUse,
+            onValueChange = { brandPhrasesToUse = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Phrases to use, optional") },
+            minLines = 2
+        )
+        OutlinedTextField(
+            value = brandPhrasesToAvoid,
+            onValueChange = { brandPhrasesToAvoid = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Phrases to avoid, optional") },
+            placeholder = { Text("Example: confirm viral, wajib beli") },
+            minLines = 2
+        )
+        Button(
+            onClick = {
+                repository.saveBrandVoice(
+                    BrandVoiceProfile(
+                        name = brandName,
+                        tone = brandTone,
+                        preferredCallToAction = brandCallToAction,
+                        phrasesToUse = brandPhrasesToUse,
+                        phrasesToAvoid = brandPhrasesToAvoid
+                    )
+                )
+                brandMessage = "Brand voice saved"
+            },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = listOf(
+                brandName,
+                brandTone,
+                brandCallToAction,
+                brandPhrasesToUse,
+                brandPhrasesToAvoid
+            ).any { it.isNotBlank() }
+        ) {
+            Text("Save brand voice")
+        }
+        if (existingBrandVoice.isConfigured() || brandMessage.isNotBlank()) {
+            OutlinedButton(
+                onClick = {
+                    repository.clearBrandVoice()
+                    brandName = ""
+                    brandTone = ""
+                    brandCallToAction = ""
+                    brandPhrasesToUse = ""
+                    brandPhrasesToAvoid = ""
+                    brandMessage = "Brand voice removed"
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Remove brand voice")
+            }
+        }
+        if (brandMessage.isNotBlank()) {
+            Text(brandMessage, color = MaterialTheme.colorScheme.primary)
+        }
+
+        HorizontalDivider()
         Text("How to get a free key", fontWeight = FontWeight.Bold)
         Text(
             "Open Google AI Studio in your browser, create a Gemini API key, then paste it above. SmartAgent sends product information only when you tap Generate."
         )
         Text(
-            "SmartAgent 0.5.0  |  Personal build",
+            "SmartAgent 0.6.0  |  Personal build",
             style = MaterialTheme.typography.bodySmall
         )
     }

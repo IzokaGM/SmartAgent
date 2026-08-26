@@ -1,4 +1,4 @@
-SmartAgent 0.5.0 structured content-pack build
+SmartAgent 0.6.0 personal brand-voice build
 
 Compose BOM: 2025.08.00
 Activity Compose: 1.11.0
@@ -17,3 +17,6 @@ confidence guidance, and asks the user to confirm product facts before generatio
 It also adds one or three complete creative alternatives, platform-specific word
 targets, structured output cards, per-section copy controls, and regeneration of
 one section without replacing the rest of the content pack.
+It now saves one personal brand voice locally, applies it to full generation and
+section regeneration, and checks each voice-over word count against the selected
+video duration.

@@ -24,6 +24,34 @@ class LocalRepository(context: Context) {
         preferences.edit().putString(KEY_MODEL, model.trim().ifBlank { DEFAULT_MODEL }).apply()
     }
 
+    fun loadBrandVoice(): BrandVoiceProfile = BrandVoiceProfile(
+        name = preferences.getString(KEY_BRAND_NAME, "").orEmpty(),
+        tone = preferences.getString(KEY_BRAND_TONE, "").orEmpty(),
+        preferredCallToAction = preferences.getString(KEY_BRAND_CTA, "").orEmpty(),
+        phrasesToUse = preferences.getString(KEY_BRAND_USE, "").orEmpty(),
+        phrasesToAvoid = preferences.getString(KEY_BRAND_AVOID, "").orEmpty()
+    )
+
+    fun saveBrandVoice(profile: BrandVoiceProfile) {
+        preferences.edit()
+            .putString(KEY_BRAND_NAME, profile.name.trim())
+            .putString(KEY_BRAND_TONE, profile.tone.trim())
+            .putString(KEY_BRAND_CTA, profile.preferredCallToAction.trim())
+            .putString(KEY_BRAND_USE, profile.phrasesToUse.trim())
+            .putString(KEY_BRAND_AVOID, profile.phrasesToAvoid.trim())
+            .apply()
+    }
+
+    fun clearBrandVoice() {
+        preferences.edit()
+            .remove(KEY_BRAND_NAME)
+            .remove(KEY_BRAND_TONE)
+            .remove(KEY_BRAND_CTA)
+            .remove(KEY_BRAND_USE)
+            .remove(KEY_BRAND_AVOID)
+            .apply()
+    }
+
     fun loadHistory(): List<GenerationRecord> {
         val raw = preferences.getString(KEY_HISTORY, "[]") ?: "[]"
         return runCatching {
@@ -76,6 +104,11 @@ class LocalRepository(context: Context) {
         private const val PREFS_NAME = "smartagent_local"
         private const val KEY_MODEL = "gemini_model"
         private const val KEY_HISTORY = "generation_history"
+        private const val KEY_BRAND_NAME = "brand_name"
+        private const val KEY_BRAND_TONE = "brand_tone"
+        private const val KEY_BRAND_CTA = "brand_cta"
+        private const val KEY_BRAND_USE = "brand_phrases_use"
+        private const val KEY_BRAND_AVOID = "brand_phrases_avoid"
         private const val MAX_HISTORY = 50
     }
 }
