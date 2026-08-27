@@ -2,7 +2,7 @@
 
 SmartAgent is a private Android content assistant for Malaysian creators. It converts a product, screenshot, or content idea into a publish-ready content pack for TikTok, Facebook, Threads, or WhatsApp.
 
-## Current personal build 0.6.0
+## Current personal build 0.7.0
 
 - Affiliate and organic content modes
 - Product link input through paste or Android Share
@@ -30,6 +30,10 @@ SmartAgent is a private Android content assistant for Malaysian creators. It con
 - Thirteen content styles including UGC, demo, testimonial, comparison, POV, and myth buster
 - Saved personal brand voice with tone, preferred call to action, phrases to use, and phrases to avoid
 - Per-result voice-over word counting with duration-fit guidance
+- Private saved-product library for up to 100 products
+- Product search by name, seller, link, or feature
+- One-tap reuse, update, and deletion of saved products
+- Price and promotion freshness reminder whenever a saved product is reopened
 
 ## Privacy model
 
@@ -45,6 +49,7 @@ The app has no SmartAgent account, analytics, advertisement SDK, remote database
 6. Tap **Use this page** to fill the structured product fields.
 7. Check the product name, price, seller, promotion, description, and features.
 8. Select the confirmation box only after checking the displayed claims.
+9. Tap **Save product for later** if you want to reuse it without extracting again.
 
 If link access is blocked, choose **Screenshot**. SmartAgent reads the screenshot immediately and fills the same editable verification fields.
 

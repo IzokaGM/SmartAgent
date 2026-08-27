@@ -83,6 +83,45 @@ class LocalRepository(context: Context) {
         preferences.edit().remove(KEY_HISTORY).apply()
     }
 
+    fun loadSavedProducts(): List<SavedProduct> {
+        val raw = preferences.getString(KEY_SAVED_PRODUCTS, "[]") ?: "[]"
+        return runCatching {
+            val array = JSONArray(raw)
+            buildList {
+                for (index in 0 until array.length()) {
+                    val item = array.getJSONObject(index)
+                    add(
+                        SavedProduct(
+                            id = item.getLong("id"),
+                            updatedAt = item.optLong("updatedAt", item.getLong("id")),
+                            link = item.optString("link"),
+                            name = item.optString("name"),
+                            price = item.optString("price"),
+                            seller = item.optString("seller"),
+                            promotion = item.optString("promotion"),
+                            description = item.optString("description"),
+                            features = item.optString("features"),
+                            additionalFacts = item.optString("additionalFacts")
+                        )
+                    )
+                }
+            }.filter { it.name.isNotBlank() }
+                .sortedByDescending { it.updatedAt }
+        }.getOrDefault(emptyList())
+    }
+
+    fun saveProduct(product: SavedProduct): List<SavedProduct> {
+        val updated = listOf(product) + loadSavedProducts().filterNot { it.id == product.id }
+        saveProducts(updated.take(MAX_SAVED_PRODUCTS))
+        return updated.take(MAX_SAVED_PRODUCTS)
+    }
+
+    fun deleteProduct(productId: Long): List<SavedProduct> {
+        val updated = loadSavedProducts().filterNot { it.id == productId }
+        saveProducts(updated)
+        return updated
+    }
+
     private fun saveHistory(records: List<GenerationRecord>) {
         val array = JSONArray()
         records.forEach { record ->
@@ -98,17 +137,39 @@ class LocalRepository(context: Context) {
         preferences.edit().putString(KEY_HISTORY, array.toString()).apply()
     }
 
+    private fun saveProducts(products: List<SavedProduct>) {
+        val array = JSONArray()
+        products.forEach { product ->
+            array.put(
+                JSONObject()
+                    .put("id", product.id)
+                    .put("updatedAt", product.updatedAt)
+                    .put("link", product.link)
+                    .put("name", product.name)
+                    .put("price", product.price)
+                    .put("seller", product.seller)
+                    .put("promotion", product.promotion)
+                    .put("description", product.description)
+                    .put("features", product.features)
+                    .put("additionalFacts", product.additionalFacts)
+            )
+        }
+        preferences.edit().putString(KEY_SAVED_PRODUCTS, array.toString()).apply()
+    }
+
     companion object {
         const val DEFAULT_MODEL = "gemini-3.5-flash-lite"
         private const val LEGACY_DEFAULT_MODEL = "gemini-2.5-flash-lite"
         private const val PREFS_NAME = "smartagent_local"
         private const val KEY_MODEL = "gemini_model"
         private const val KEY_HISTORY = "generation_history"
+        private const val KEY_SAVED_PRODUCTS = "saved_products"
         private const val KEY_BRAND_NAME = "brand_name"
         private const val KEY_BRAND_TONE = "brand_tone"
         private const val KEY_BRAND_CTA = "brand_cta"
         private const val KEY_BRAND_USE = "brand_phrases_use"
         private const val KEY_BRAND_AVOID = "brand_phrases_avoid"
         private const val MAX_HISTORY = 50
+        private const val MAX_SAVED_PRODUCTS = 100
     }
 }

@@ -90,6 +90,7 @@ import com.smartagent.app.data.ProductDetails
 import com.smartagent.app.data.ProductLinkResolver
 import com.smartagent.app.data.PromptBuilder
 import com.smartagent.app.data.SecureKeyStore
+import com.smartagent.app.data.SavedProduct
 import com.smartagent.app.data.asVariantText
 import com.smartagent.app.data.recommendedVoiceOverWords
 import com.smartagent.app.ui.theme.SmartAgentTheme
@@ -139,6 +140,7 @@ class MainActivity : ComponentActivity() {
 
 private enum class AppTab(val label: String, val symbol: String) {
     CREATE("Create", "✦"),
+    PRODUCTS("Products", "▣"),
     HISTORY("History", "◷"),
     SETTINGS("Settings", "⚙")
 }
@@ -153,6 +155,8 @@ private fun SmartAgentApp(
 ) {
     var selectedTab by rememberSaveable { mutableStateOf(AppTab.CREATE) }
     var history by remember { mutableStateOf(repository.loadHistory()) }
+    var savedProducts by remember { mutableStateOf(repository.loadSavedProducts()) }
+    var productToLoad by remember { mutableStateOf<SavedProduct?>(null) }
     var keyConfigured by remember { mutableStateOf(secureKeyStore.hasApiKey()) }
 
     Scaffold(
@@ -197,9 +201,25 @@ private fun SmartAgentApp(
                     repository = repository,
                     geminiClient = geminiClient,
                     keyConfigured = keyConfigured,
+                    productToLoad = productToLoad,
+                    onProductLoaded = { productToLoad = null },
+                    onProductSaved = { product ->
+                        savedProducts = repository.saveProduct(product)
+                    },
                     onOpenSettings = { selectedTab = AppTab.SETTINGS },
                     onRecordCreated = { record ->
                         history = repository.addHistory(record)
+                    }
+                )
+
+                AppTab.PRODUCTS -> ProductsScreen(
+                    products = savedProducts,
+                    onUse = { product ->
+                        productToLoad = product
+                        selectedTab = AppTab.CREATE
+                    },
+                    onDelete = { product ->
+                        savedProducts = repository.deleteProduct(product.id)
                     }
                 )
 
@@ -229,6 +249,9 @@ private fun CreateScreen(
     repository: LocalRepository,
     geminiClient: GeminiClient,
     keyConfigured: Boolean,
+    productToLoad: SavedProduct?,
+    onProductLoaded: () -> Unit,
+    onProductSaved: (SavedProduct) -> Unit,
     onOpenSettings: () -> Unit,
     onRecordCreated: (GenerationRecord) -> Unit
 ) {
@@ -272,11 +295,39 @@ private fun CreateScreen(
     var currentRecordId by remember { mutableStateOf<Long?>(null) }
     var regeneratingSection by remember { mutableStateOf<ContentSection?>(null) }
     var errorMessage by rememberSaveable { mutableStateOf("") }
+    var editingSavedProductId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var savedProductMessage by rememberSaveable { mutableStateOf("") }
 
     LaunchedEffect(incomingText) {
         if (incomingText.isNotBlank() && incomingText != productLink) {
             productLink = ProductLinkResolver.extractUrl(incomingText) ?: incomingText
             mode = InputMode.AFFILIATE
+            editingSavedProductId = null
+            savedProductMessage = ""
+        }
+    }
+
+    LaunchedEffect(productToLoad?.id, productToLoad?.updatedAt) {
+        productToLoad?.let { product ->
+            mode = InputMode.AFFILIATE
+            productLink = product.link
+            productName = product.name
+            productPrice = product.price
+            productSeller = product.seller
+            productPromotion = product.promotion
+            productDescription = product.description
+            productFeatures = product.features
+            productFacts = product.additionalFacts
+            extractionSource = "Saved product library"
+            extractionConfidence = ExtractionConfidence.MEDIUM
+            extractionWarning = "Check whether the price or promotion has changed since this product was saved."
+            verifiedByUser = false
+            editingSavedProductId = product.id
+            savedProductMessage = "Loaded from your product library."
+            imageBase64 = null
+            output = emptyList()
+            currentRequest = null
+            onProductLoaded()
         }
     }
 
@@ -292,6 +343,7 @@ private fun CreateScreen(
         extractionConfidence = product.confidence
         extractionWarning = product.warning
         verifiedByUser = false
+        savedProductMessage = ""
     }
 
     val imagePicker = rememberLauncherForActivityResult(
@@ -446,6 +498,8 @@ private fun CreateScreen(
                         extractionConfidence = null
                         extractionWarning = ""
                         verifiedByUser = false
+                        editingSavedProductId = null
+                        savedProductMessage = ""
                     },
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("Shopee or TikTok product link") },
@@ -581,7 +635,27 @@ private fun CreateScreen(
                     confidence = extractionConfidence,
                     warning = extractionWarning,
                     verifiedByUser = verifiedByUser,
-                    onVerifiedChanged = { verifiedByUser = it }
+                    onVerifiedChanged = { verifiedByUser = it },
+                    savedProductMessage = savedProductMessage,
+                    isSavedProduct = editingSavedProductId != null,
+                    onSaveProduct = {
+                        val now = System.currentTimeMillis()
+                        val product = SavedProduct(
+                            id = editingSavedProductId ?: now,
+                            updatedAt = now,
+                            link = productLink.trim(),
+                            name = productName.trim(),
+                            price = productPrice.trim(),
+                            seller = productSeller.trim(),
+                            promotion = productPromotion.trim(),
+                            description = productDescription.trim(),
+                            features = productFeatures.trim(),
+                            additionalFacts = productFacts.trim()
+                        )
+                        onProductSaved(product)
+                        editingSavedProductId = product.id
+                        savedProductMessage = "Product saved privately on this phone."
+                    }
                 )
             }
         } else {
@@ -983,7 +1057,10 @@ private fun ProductVerificationFields(
     confidence: ExtractionConfidence?,
     warning: String,
     verifiedByUser: Boolean,
-    onVerifiedChanged: (Boolean) -> Unit
+    onVerifiedChanged: (Boolean) -> Unit,
+    savedProductMessage: String,
+    isSavedProduct: Boolean,
+    onSaveProduct: () -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         SectionTitle("2. Check product details")
@@ -1073,6 +1150,21 @@ private fun ProductVerificationFields(
         ) {
             Checkbox(checked = verifiedByUser, onCheckedChange = onVerifiedChanged)
             Text("I checked the product name, price and claims shown above")
+        }
+        OutlinedButton(
+            onClick = onSaveProduct,
+            enabled = productName.isNotBlank(),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(if (isSavedProduct) "Update saved product" else "Save product for later")
+        }
+        if (savedProductMessage.isNotBlank()) {
+            Text(
+                savedProductMessage,
+                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Bold
+            )
         }
     }
 }
@@ -1247,6 +1339,119 @@ private val PAGE_CAPTURE_SCRIPT = """
       });
     })();
 """.trimIndent()
+
+@Composable
+private fun ProductsScreen(
+    products: List<SavedProduct>,
+    onUse: (SavedProduct) -> Unit,
+    onDelete: (SavedProduct) -> Unit
+) {
+    var query by rememberSaveable { mutableStateOf("") }
+    var productToDelete by remember { mutableStateOf<SavedProduct?>(null) }
+    val filteredProducts = remember(products, query) {
+        val cleanQuery = query.trim()
+        if (cleanQuery.isBlank()) {
+            products
+        } else {
+            products.filter { product ->
+                listOf(product.name, product.seller, product.link, product.features)
+                    .any { value -> value.contains(cleanQuery, ignoreCase = true) }
+            }
+        }
+    }
+
+    productToDelete?.let { product ->
+        AlertDialog(
+            onDismissRequest = { productToDelete = null },
+            title = { Text("Delete saved product?") },
+            text = { Text(product.name) },
+            confirmButton = {
+                TextButton(onClick = {
+                    onDelete(product)
+                    productToDelete = null
+                }) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { productToDelete = null }) { Text("Cancel") }
+            }
+        )
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 28.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        item {
+            SectionTitle("Saved products")
+            Text(
+                "Save verified products once, then reuse them without extracting the same page again.",
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+
+        if (products.isNotEmpty()) {
+            item {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Search products") },
+                    placeholder = { Text("Name, seller, link, or feature") },
+                    singleLine = true
+                )
+            }
+        }
+
+        if (products.isEmpty()) {
+            item {
+                Card {
+                    Column(Modifier.padding(20.dp)) {
+                        Text("No saved products yet", fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(5.dp))
+                        Text("Extract or enter a product in Create, then tap Save product for later.")
+                    }
+                }
+            }
+        } else if (filteredProducts.isEmpty()) {
+            item {
+                Card {
+                    Text("No products match your search.", Modifier.padding(20.dp))
+                }
+            }
+        } else {
+            items(filteredProducts, key = { it.id }) { product ->
+                Card {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(product.name, fontWeight = FontWeight.Bold)
+                        val summary = listOf(product.price, product.seller)
+                            .filter { it.isNotBlank() }
+                            .joinToString("  |  ")
+                        if (summary.isNotBlank()) Text(summary)
+                        if (product.promotion.isNotBlank()) {
+                            Text(
+                                product.promotion,
+                                color = MaterialTheme.colorScheme.primary,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        Text(
+                            "Updated ${DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(product.updatedAt))}",
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = { onUse(product) }) { Text("Use product") }
+                            TextButton(onClick = { productToDelete = product }) { Text("Delete") }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun HistoryScreen(
@@ -1520,7 +1725,7 @@ private fun SettingsScreen(
             "Open Google AI Studio in your browser, create a Gemini API key, then paste it above. SmartAgent sends product information only when you tap Generate."
         )
         Text(
-            "SmartAgent 0.6.0  |  Personal build",
+            "SmartAgent 0.7.0  |  Personal build",
             style = MaterialTheme.typography.bodySmall
         )
     }

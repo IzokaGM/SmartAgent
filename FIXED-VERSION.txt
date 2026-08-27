@@ -1,4 +1,4 @@
-SmartAgent 0.6.0 personal brand-voice build
+SmartAgent 0.7.0 saved-product library build
 
 Compose BOM: 2025.08.00
 Activity Compose: 1.11.0
@@ -20,3 +20,5 @@ one section without replacing the rest of the content pack.
 It now saves one personal brand voice locally, applies it to full generation and
 section regeneration, and checks each voice-over word count against the selected
 video duration.
+It now stores up to 100 verified products privately on the phone, supports product
+search, and lets the user reopen, update, or delete saved product details.

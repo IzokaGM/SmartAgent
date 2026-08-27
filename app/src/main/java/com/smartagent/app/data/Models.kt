@@ -148,6 +148,19 @@ data class GenerationRecord(
     val result: String
 )
 
+data class SavedProduct(
+    val id: Long,
+    val updatedAt: Long,
+    val link: String,
+    val name: String,
+    val price: String = "",
+    val seller: String = "",
+    val promotion: String = "",
+    val description: String = "",
+    val features: String = "",
+    val additionalFacts: String = ""
+)
+
 data class ProductDetails(
     val name: String,
     val price: String = "",
