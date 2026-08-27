@@ -2,7 +2,7 @@
 
 SmartAgent is a private Android content assistant for Malaysian creators. It converts a product, screenshot, or content idea into a publish-ready content pack for TikTok, Facebook, Threads, or WhatsApp.
 
-## Current personal build 0.7.0
+## Current personal build 0.8.0
 
 - Affiliate and organic content modes
 - Product link input through paste or Android Share
@@ -34,6 +34,12 @@ SmartAgent is a private Android content assistant for Malaysian creators. It con
 - Product search by name, seller, link, or feature
 - One-tap reuse, update, and deletion of saved products
 - Price and promotion freshness reminder whenever a saved product is reopened
+- Dedicated Threads engine with a main post and one, two, or four ordered replies
+- Separate Copy and Regenerate controls for every Threads post
+- Guided Copy Next workflow and an Open Threads action
+- Affiliate-link placement in the final reply, main post, or nowhere
+- Per-post character counts with a 450-character readability target
+- One or three complete thread alternatives using different creative angles
 
 ## Privacy model
 

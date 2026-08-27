@@ -47,6 +47,48 @@ class GeminiClient {
         }
     }
 
+    fun generateThreads(
+        apiKey: String,
+        model: String,
+        prompt: String,
+        variantCount: Int,
+        replyCount: Int,
+        imageBase64: String? = null,
+        productUrl: String? = null
+    ): Result<List<ThreadsPack>> = runCatching {
+        require(variantCount == 1 || variantCount == 3) { "Variant count must be 1 or 3" }
+        require(replyCount in 1..4) { "Threads reply count must be from 1 to 4" }
+        val parts = JSONArray().put(JSONObject().put("text", prompt))
+        if (!imageBase64.isNullOrBlank()) {
+            parts.put(
+                JSONObject().put(
+                    "inline_data",
+                    JSONObject()
+                        .put("mime_type", "image/jpeg")
+                        .put("data", imageBase64)
+                )
+            )
+        }
+        val body = createBody(
+            parts = parts,
+            temperature = 0.8,
+            maxOutputTokens = if (variantCount == 3) 8_000 else 3200,
+            enableUrlContext = !productUrl.isNullOrBlank(),
+            responseSchema = threadsPackSetResponseSchema()
+        )
+        val json = extractJsonObject(execute(apiKey, model, body).text)
+        val variants = json.optJSONArray("variants") ?: error("Gemini returned no thread alternatives")
+        buildList {
+            for (index in 0 until variants.length()) {
+                variants.optJSONObject(index)?.let { add(threadsPackFromJson(it, replyCount)) }
+            }
+        }.also { packs ->
+            require(packs.size == variantCount) {
+                "Gemini returned ${packs.size} thread alternatives instead of $variantCount"
+            }
+        }
+    }
+
     fun regenerateSection(
         apiKey: String,
         model: String,
@@ -450,6 +492,28 @@ class GeminiClient {
         }
     }
 
+    private fun threadsPackFromJson(json: JSONObject, replyCount: Int): ThreadsPack {
+        val replies = buildList {
+            val array = json.optJSONArray("replies") ?: error("Gemini returned no thread replies")
+            for (index in 0 until array.length()) {
+                array.optString(index).trim().takeIf { it.isNotBlank() }?.let(::add)
+            }
+        }
+        require(replies.size == replyCount) {
+            "Gemini returned ${replies.size} replies instead of $replyCount"
+        }
+        return ThreadsPack(
+            title = json.optString("title").trim(),
+            mainPost = json.optString("main_post").trim(),
+            replies = replies,
+            checklist = json.optString("checklist").trim()
+        ).also { pack ->
+            require(pack.title.isNotBlank() && pack.mainPost.isNotBlank() && pack.checklist.isNotBlank()) {
+                "Gemini returned an incomplete Threads pack"
+            }
+        }
+    }
+
     private fun contentPackItemSchema(): JSONObject {
         val properties = JSONObject()
         val required = JSONArray()
@@ -481,6 +545,43 @@ class GeminiClient {
                 JSONObject()
                     .put("type", "ARRAY")
                     .put("items", contentPackItemSchema())
+            )
+        )
+        .put("required", JSONArray().put("variants"))
+
+    private fun threadsPackItemSchema(): JSONObject = JSONObject()
+        .put("type", "OBJECT")
+        .put(
+            "properties",
+            JSONObject()
+                .put("title", JSONObject().put("type", "STRING"))
+                .put("main_post", JSONObject().put("type", "STRING"))
+                .put(
+                    "replies",
+                    JSONObject()
+                        .put("type", "ARRAY")
+                        .put("items", JSONObject().put("type", "STRING"))
+                )
+                .put("checklist", JSONObject().put("type", "STRING"))
+        )
+        .put(
+            "required",
+            JSONArray()
+                .put("title")
+                .put("main_post")
+                .put("replies")
+                .put("checklist")
+        )
+
+    private fun threadsPackSetResponseSchema(): JSONObject = JSONObject()
+        .put("type", "OBJECT")
+        .put(
+            "properties",
+            JSONObject().put(
+                "variants",
+                JSONObject()
+                    .put("type", "ARRAY")
+                    .put("items", threadsPackItemSchema())
             )
         )
         .put("required", JSONArray().put("variants"))

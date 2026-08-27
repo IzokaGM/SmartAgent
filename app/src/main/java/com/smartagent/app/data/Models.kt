@@ -35,6 +35,18 @@ enum class ContentStyle(val label: String) {
     TESTIMONIAL("Testimonial style")
 }
 
+enum class ThreadLength(val label: String, val replyCount: Int) {
+    SHORT("Short: 1 reply", 1),
+    STANDARD("Standard: 2 replies", 2),
+    LONG("Long: 4 replies", 4)
+}
+
+enum class ThreadLinkPlacement(val label: String) {
+    FINAL_REPLY("Final reply"),
+    MAIN_POST("Main post"),
+    OMIT("Do not include")
+}
+
 data class ContentRequest(
     val mode: InputMode = InputMode.AFFILIATE,
     val productLink: String = "",
@@ -47,6 +59,8 @@ data class ContentRequest(
     val style: ContentStyle = ContentStyle.UGC,
     val audience: String = "",
     val variantCount: Int = 1,
+    val threadReplyCount: Int = ThreadLength.STANDARD.replyCount,
+    val threadLinkPlacement: ThreadLinkPlacement = ThreadLinkPlacement.FINAL_REPLY,
     val brandVoice: BrandVoiceProfile = BrandVoiceProfile(),
     val hasScreenshot: Boolean = false
 )
@@ -138,6 +152,36 @@ data class ContentPack(
 
 fun List<ContentPack>.asVariantText(): String = mapIndexed { index, pack ->
     "ALTERNATIVE ${index + 1}\n\n${pack.asPlainText()}"
+}.joinToString("\n\n====================\n\n")
+
+data class ThreadsPack(
+    val title: String,
+    val mainPost: String,
+    val replies: List<String>,
+    val checklist: String
+) {
+    fun posts(): List<String> = listOf(mainPost) + replies
+
+    fun replacePost(index: Int, content: String): ThreadsPack = when {
+        index == 0 -> copy(mainPost = content)
+        index in 1..replies.size -> copy(
+            replies = replies.toMutableList().also { it[index - 1] = content }
+        )
+        else -> this
+    }
+
+    fun asPlainText(): String = buildString {
+        append("TITLE\n").append(title.trim())
+        append("\n\nPOST UTAMA\n").append(mainPost.trim())
+        replies.forEachIndexed { index, reply ->
+            append("\n\nREPLY ").append(index + 1).append('\n').append(reply.trim())
+        }
+        append("\n\nCREATOR CHECKLIST\n").append(checklist.trim())
+    }
+}
+
+fun List<ThreadsPack>.asThreadsVariantText(): String = mapIndexed { index, pack ->
+    "THREAD ALTERNATIVE ${index + 1}\n\n${pack.asPlainText()}"
 }.joinToString("\n\n====================\n\n")
 
 data class GenerationRecord(

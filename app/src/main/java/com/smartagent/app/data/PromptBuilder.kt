@@ -83,6 +83,102 @@ object PromptBuilder {
         """.trimIndent()
     }
 
+    fun buildThreads(request: ContentRequest): String {
+        val languageInstruction = when (request.language) {
+            OutputLanguage.MALAY -> "Write in natural conversational Malaysian Bahasa Melayu. Avoid Indonesian wording and stiff translations."
+            OutputLanguage.ENGLISH -> "Write in natural conversational British English."
+        }
+        val brandVoiceInstruction = if (request.brandVoice.isConfigured()) {
+            "Saved personal brand voice:\n${request.brandVoice.promptText()}"
+        } else {
+            "No saved personal brand voice is active."
+        }
+        val linkInstruction = when (request.threadLinkPlacement) {
+            ThreadLinkPlacement.FINAL_REPLY -> if (request.productLink.isNotBlank()) {
+                "Place this exact affiliate link once, only in the final reply: ${request.productLink.trim()}"
+            } else {
+                "No affiliate link was supplied. End with a natural call to action without inventing a link."
+            }
+            ThreadLinkPlacement.MAIN_POST -> if (request.productLink.isNotBlank()) {
+                "Place this exact affiliate link once, only in the main post: ${request.productLink.trim()}"
+            } else {
+                "No affiliate link was supplied. Do not invent one."
+            }
+            ThreadLinkPlacement.OMIT -> "Do not include any link in the thread."
+        }
+
+        return """
+            You are SmartAgent, a careful Threads copywriter for Malaysian creators.
+
+            Create a genuine multi-post Threads chain, not a video script and not one long caption.
+
+            Product or topic: ${request.productName.ifBlank { "Not supplied" }}
+            Product link: ${request.productLink.ifBlank { "Not supplied" }}
+            Verified facts:
+            ${request.productFacts.ifBlank { "No verified facts supplied" }}
+            Verification status: ${request.verificationSummary.ifBlank { "No verification recorded" }}
+            Style: ${request.style.label}
+            Audience: ${request.audience.ifBlank { "General Malaysian audience" }}
+            $languageInstruction
+            $brandVoiceInstruction
+
+            Required thread structure:
+            1. Main post: lead with a relatable situation, problem, opinion, or curiosity gap. Do not sound like an advertisement immediately.
+            2. Early replies: continue the story naturally, then introduce the product or main idea and its verified features.
+            3. Final reply: give a clear but natural call to action. $linkInstruction
+            4. Produce exactly ${request.threadReplyCount} replies after the main post.
+            5. Each part must make sense in sequence and be concise enough for comfortable mobile reading. Aim for no more than 450 characters per part.
+            6. Do not repeat the same opening or product description in multiple replies.
+            7. Do not put labels such as "Post utama" or "Reply 1" inside the generated text.
+            8. Do not use fake personal experience, fake testimonials, invented urgency, or unsupported claims.
+            9. Never invent a price, discount, specification, rating, benefit, or product feature.
+            10. Use the exact supplied affiliate link without shortening or changing it, and only where instructed.
+
+            Create exactly ${request.variantCount} complete thread ${if (request.variantCount == 1) "pack" else "alternatives"}.
+            Each alternative must use a genuinely different angle while preserving every verified fact.
+
+            Return a structured variants list. Every variant must contain:
+            - title: a short internal working title.
+            - main_post: the opening Threads post.
+            - replies: exactly ${request.threadReplyCount} reply strings in posting order.
+            - checklist: facts, prices, promotions, links, or claims the creator should check before publishing. If none are needed, write "No additional checks identified".
+        """.trimIndent()
+    }
+
+    fun buildThreadPost(
+        request: ContentRequest,
+        postIndex: Int,
+        currentPack: ThreadsPack
+    ): String {
+        val partLabel = if (postIndex == 0) "main post" else "reply $postIndex"
+        val linkInstruction = when (request.threadLinkPlacement) {
+            ThreadLinkPlacement.FINAL_REPLY -> "The exact link may appear only in reply ${request.threadReplyCount}: ${request.productLink}"
+            ThreadLinkPlacement.MAIN_POST -> "The exact link may appear only in the main post: ${request.productLink}"
+            ThreadLinkPlacement.OMIT -> "Do not include any link."
+        }
+        return """
+            You are SmartAgent, a careful Threads copywriter for Malaysian creators.
+
+            Regenerate only the $partLabel in the existing thread below.
+            Keep the replacement consistent with the surrounding posts, verified facts, audience, style, language, and saved brand voice.
+            Preserve the thread's narrative flow. Aim for no more than 450 characters. Return only the replacement text.
+
+            Product or topic: ${request.productName}
+            Verified facts: ${request.productFacts}
+            Verification status: ${request.verificationSummary}
+            Language: ${request.language.label}
+            Style: ${request.style.label}
+            Audience: ${request.audience.ifBlank { "General Malaysian audience" }}
+            Saved personal brand voice: ${request.brandVoice.promptText().ifBlank { "Not active" }}
+            $linkInstruction
+
+            Existing thread:
+            ${currentPack.asPlainText()}
+
+            Accuracy rules: never invent product facts, prices, promotions, personal experience, testimonials, urgency, or benefits.
+        """.trimIndent()
+    }
+
     fun buildSection(
         request: ContentRequest,
         section: ContentSection,

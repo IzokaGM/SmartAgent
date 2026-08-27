@@ -1,8 +1,10 @@
 package com.smartagent.app
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.net.Uri
 import android.os.Bundle
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
@@ -91,7 +93,11 @@ import com.smartagent.app.data.ProductLinkResolver
 import com.smartagent.app.data.PromptBuilder
 import com.smartagent.app.data.SecureKeyStore
 import com.smartagent.app.data.SavedProduct
+import com.smartagent.app.data.ThreadLength
+import com.smartagent.app.data.ThreadLinkPlacement
+import com.smartagent.app.data.ThreadsPack
 import com.smartagent.app.data.asVariantText
+import com.smartagent.app.data.asThreadsVariantText
 import com.smartagent.app.data.recommendedVoiceOverWords
 import com.smartagent.app.ui.theme.SmartAgentTheme
 import kotlinx.coroutines.Dispatchers
@@ -278,6 +284,8 @@ private fun CreateScreen(
     var style by rememberSaveable { mutableStateOf(ContentStyle.UGC) }
     var audience by rememberSaveable { mutableStateOf("") }
     var variantCount by rememberSaveable { mutableStateOf(1) }
+    var threadLength by rememberSaveable { mutableStateOf(ThreadLength.STANDARD) }
+    var threadLinkPlacement by rememberSaveable { mutableStateOf(ThreadLinkPlacement.FINAL_REPLY) }
     var useBrandVoice by rememberSaveable { mutableStateOf(savedBrandVoice.isConfigured()) }
     var imageBase64 by remember { mutableStateOf<String?>(null) }
     var imageStatus by rememberSaveable { mutableStateOf("No screenshot selected") }
@@ -290,10 +298,12 @@ private fun CreateScreen(
     var isProcessingCapture by remember { mutableStateOf(false) }
     var isGenerating by remember { mutableStateOf(false) }
     var output by remember { mutableStateOf<List<ContentPack>>(emptyList()) }
+    var threadsOutput by remember { mutableStateOf<List<ThreadsPack>>(emptyList()) }
     var selectedVariant by rememberSaveable { mutableStateOf(0) }
     var currentRequest by remember { mutableStateOf<ContentRequest?>(null) }
     var currentRecordId by remember { mutableStateOf<Long?>(null) }
     var regeneratingSection by remember { mutableStateOf<ContentSection?>(null) }
+    var regeneratingThreadPost by remember { mutableStateOf<Int?>(null) }
     var errorMessage by rememberSaveable { mutableStateOf("") }
     var editingSavedProductId by rememberSaveable { mutableStateOf<Long?>(null) }
     var savedProductMessage by rememberSaveable { mutableStateOf("") }
@@ -326,6 +336,7 @@ private fun CreateScreen(
             savedProductMessage = "Loaded from your product library."
             imageBase64 = null
             output = emptyList()
+            threadsOutput = emptyList()
             currentRequest = null
             onProductLoaded()
         }
@@ -686,16 +697,47 @@ private fun CreateScreen(
                 options = Platform.entries,
                 selected = platform,
                 label = { it.label },
-                onSelected = { platform = it }
+                onSelected = {
+                    platform = it
+                    output = emptyList()
+                    threadsOutput = emptyList()
+                    currentRequest = null
+                }
             )
-            Spacer(Modifier.height(10.dp))
-            Text("Duration", style = MaterialTheme.typography.labelLarge)
-            ChoiceRow(
-                options = listOf(10, 15, 30, 60, 120),
-                selected = duration,
-                label = { "${it}s" },
-                onSelected = { duration = it }
-            )
+            if (platform == Platform.THREADS) {
+                Spacer(Modifier.height(10.dp))
+                Text("Thread length", style = MaterialTheme.typography.labelLarge)
+                ChoiceRow(
+                    options = ThreadLength.entries,
+                    selected = threadLength,
+                    label = { it.label },
+                    onSelected = { threadLength = it }
+                )
+                if (mode == InputMode.AFFILIATE) {
+                    Spacer(Modifier.height(10.dp))
+                    Text("Affiliate link placement", style = MaterialTheme.typography.labelLarge)
+                    ChoiceRow(
+                        options = ThreadLinkPlacement.entries,
+                        selected = threadLinkPlacement,
+                        label = { it.label },
+                        onSelected = { threadLinkPlacement = it }
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "SmartAgent will generate one main post followed by separate replies in posting order.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            } else {
+                Spacer(Modifier.height(10.dp))
+                Text("Duration", style = MaterialTheme.typography.labelLarge)
+                ChoiceRow(
+                    options = listOf(10, 15, 30, 60, 120),
+                    selected = duration,
+                    label = { "${it}s" },
+                    onSelected = { duration = it }
+                )
+            }
             Spacer(Modifier.height(10.dp))
             Text("Language", style = MaterialTheme.typography.labelLarge)
             ChoiceRow(
@@ -824,41 +866,80 @@ private fun CreateScreen(
                                 style = style,
                                 audience = audience,
                                 variantCount = variantCount,
+                                threadReplyCount = threadLength.replyCount,
+                                threadLinkPlacement = if (mode == InputMode.AFFILIATE) {
+                                    threadLinkPlacement
+                                } else {
+                                    ThreadLinkPlacement.OMIT
+                                },
                                 brandVoice = if (useBrandVoice) savedBrandVoice else BrandVoiceProfile(),
                                 hasScreenshot = imageBase64 != null
                             )
                             isGenerating = true
                             output = emptyList()
+                            threadsOutput = emptyList()
                             selectedVariant = 0
                             currentRequest = request
                             scope.launch {
-                                val response = withContext(Dispatchers.IO) {
-                                    geminiClient.generate(
-                                        apiKey = key,
-                                        model = repository.loadModel(),
-                                        prompt = PromptBuilder.build(request),
-                                        variantCount = request.variantCount,
-                                        imageBase64 = imageBase64,
-                                        productUrl = productLink.takeIf {
-                                            mode == InputMode.AFFILIATE && it.isNotBlank()
-                                        }
-                                    )
-                                }
-                                response.onSuccess { generated ->
-                                    output = generated
-                                    val now = System.currentTimeMillis()
-                                    currentRecordId = now
-                                    onRecordCreated(
-                                        GenerationRecord(
-                                            id = now,
-                                            createdAt = now,
-                                            title = productName.ifBlank { "Untitled content" },
-                                            platform = platform.label,
-                                            result = generated.asVariantText()
+                                if (request.platform == Platform.THREADS) {
+                                    val response = withContext(Dispatchers.IO) {
+                                        geminiClient.generateThreads(
+                                            apiKey = key,
+                                            model = repository.loadModel(),
+                                            prompt = PromptBuilder.buildThreads(request),
+                                            variantCount = request.variantCount,
+                                            replyCount = request.threadReplyCount,
+                                            imageBase64 = imageBase64,
+                                            productUrl = productLink.takeIf {
+                                                mode == InputMode.AFFILIATE && it.isNotBlank()
+                                            }
                                         )
-                                    )
-                                }.onFailure {
-                                    errorMessage = it.message ?: "Content generation failed"
+                                    }
+                                    response.onSuccess { generated ->
+                                        threadsOutput = generated
+                                        val now = System.currentTimeMillis()
+                                        currentRecordId = now
+                                        onRecordCreated(
+                                            GenerationRecord(
+                                                id = now,
+                                                createdAt = now,
+                                                title = productName.ifBlank { "Untitled thread" },
+                                                platform = platform.label,
+                                                result = generated.asThreadsVariantText()
+                                            )
+                                        )
+                                    }.onFailure {
+                                        errorMessage = it.message ?: "Threads generation failed"
+                                    }
+                                } else {
+                                    val response = withContext(Dispatchers.IO) {
+                                        geminiClient.generate(
+                                            apiKey = key,
+                                            model = repository.loadModel(),
+                                            prompt = PromptBuilder.build(request),
+                                            variantCount = request.variantCount,
+                                            imageBase64 = imageBase64,
+                                            productUrl = productLink.takeIf {
+                                                mode == InputMode.AFFILIATE && it.isNotBlank()
+                                            }
+                                        )
+                                    }
+                                    response.onSuccess { generated ->
+                                        output = generated
+                                        val now = System.currentTimeMillis()
+                                        currentRecordId = now
+                                        onRecordCreated(
+                                            GenerationRecord(
+                                                id = now,
+                                                createdAt = now,
+                                                title = productName.ifBlank { "Untitled content" },
+                                                platform = platform.label,
+                                                result = generated.asVariantText()
+                                            )
+                                        )
+                                    }.onFailure {
+                                        errorMessage = it.message ?: "Content generation failed"
+                                    }
                                 }
                                 isGenerating = false
                             }
@@ -876,10 +957,68 @@ private fun CreateScreen(
                         color = MaterialTheme.colorScheme.onPrimary
                     )
                     Spacer(Modifier.width(10.dp))
-                    Text("Creating content pack...")
+                    Text(if (platform == Platform.THREADS) "Creating thread..." else "Creating content pack...")
                 } else {
-                    Text("Generate content pack")
+                    Text(if (platform == Platform.THREADS) "Generate Threads chain" else "Generate content pack")
                 }
+            }
+        }
+
+        if (threadsOutput.isNotEmpty()) {
+            item {
+                ThreadsPackResult(
+                    packs = threadsOutput,
+                    selectedVariant = selectedVariant,
+                    onVariantSelected = { selectedVariant = it },
+                    regeneratingPostIndex = regeneratingThreadPost,
+                    onRegenerate = { postIndex ->
+                        val key = secureKeyStore.loadApiKey()
+                        val request = currentRequest
+                        val variantIndex = selectedVariant
+                        val existingPack = threadsOutput.getOrNull(variantIndex)
+                        if (key == null || request == null || existingPack == null) {
+                            errorMessage = "The current thread settings are unavailable. Generate a new thread first."
+                        } else {
+                            errorMessage = ""
+                            regeneratingThreadPost = postIndex
+                            scope.launch {
+                                val response = withContext(Dispatchers.IO) {
+                                    geminiClient.regenerateSection(
+                                        apiKey = key,
+                                        model = repository.loadModel(),
+                                        prompt = PromptBuilder.buildThreadPost(request, postIndex, existingPack),
+                                        imageBase64 = imageBase64.takeIf { request.hasScreenshot },
+                                        productUrl = request.productLink.takeIf {
+                                            request.mode == InputMode.AFFILIATE && it.isNotBlank()
+                                        }
+                                    )
+                                }
+                                response.onSuccess { replacement ->
+                                    val updated = existingPack.replacePost(postIndex, replacement)
+                                    val updatedPacks = threadsOutput.toMutableList().also { packs ->
+                                        packs[variantIndex] = updated
+                                    }
+                                    threadsOutput = updatedPacks
+                                    val recordId = currentRecordId ?: System.currentTimeMillis().also {
+                                        currentRecordId = it
+                                    }
+                                    onRecordCreated(
+                                        GenerationRecord(
+                                            id = recordId,
+                                            createdAt = System.currentTimeMillis(),
+                                            title = productName.ifBlank { "Untitled thread" },
+                                            platform = Platform.THREADS.label,
+                                            result = updatedPacks.asThreadsVariantText()
+                                        )
+                                    )
+                                }.onFailure { failure ->
+                                    errorMessage = failure.message ?: "Thread post regeneration failed"
+                                }
+                                regeneratingThreadPost = null
+                            }
+                        }
+                    }
+                )
             }
         }
 
@@ -1034,6 +1173,173 @@ private fun ContentPackResult(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ThreadsPackResult(
+    packs: List<ThreadsPack>,
+    selectedVariant: Int,
+    onVariantSelected: (Int) -> Unit,
+    regeneratingPostIndex: Int?,
+    onRegenerate: (Int) -> Unit
+) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val pack = packs.getOrElse(selectedVariant) { packs.first() }
+    val posts = pack.posts()
+    var nextCopyIndex by remember(selectedVariant, posts.size) { mutableStateOf(0) }
+    var copyMessage by remember(selectedVariant) { mutableStateOf("") }
+
+    fun copyPost(index: Int) {
+        val content = posts.getOrNull(index) ?: return
+        clipboard.setText(AnnotatedString(content))
+        copyMessage = if (index == 0) "Main post copied." else "Reply $index copied."
+        nextCopyIndex = (index + 1).coerceAtMost(posts.size)
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SectionTitle("Your Threads chain")
+        if (packs.size > 1) {
+            ChoiceRow(
+                options = packs.indices.toList(),
+                selected = selectedVariant,
+                label = { "Alternative ${it + 1}" },
+                onSelected = onVariantSelected
+            )
+        }
+
+        Card(
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer
+            )
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("Posting assistant", fontWeight = FontWeight.Bold)
+                Text("Copy the main post, open Threads, paste it, then return here and copy each reply in order.")
+                val nextLabel = when {
+                    nextCopyIndex == 0 -> "Copy main post"
+                    nextCopyIndex < posts.size -> "Copy Reply $nextCopyIndex"
+                    else -> "Copy main post again"
+                }
+                Button(
+                    onClick = {
+                        val index = if (nextCopyIndex >= posts.size) 0 else nextCopyIndex
+                        copyPost(index)
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(nextLabel)
+                }
+                OutlinedButton(
+                    onClick = { openThreads(context) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Open Threads")
+                }
+                if (copyMessage.isNotBlank()) {
+                    Text(
+                        copyMessage,
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = {
+                    clipboard.setText(AnnotatedString(pack.asPlainText()))
+                    copyMessage = "Complete thread copied for reference."
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Copy complete thread") }
+            if (packs.size > 1) {
+                OutlinedButton(
+                    onClick = {
+                        clipboard.setText(AnnotatedString(packs.asThreadsVariantText()))
+                        copyMessage = "All alternatives copied."
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("Copy alternatives") }
+            }
+        }
+
+        Text(pack.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+
+        posts.forEachIndexed { index, content ->
+            val label = if (index == 0) "Post utama" else "Reply $index"
+            Card {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(label, fontWeight = FontWeight.Bold)
+                        Text(
+                            "${content.length} characters",
+                            color = if (content.length <= 450) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.error
+                            },
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { copyPost(index) }) { Text("Copy") }
+                        TextButton(
+                            onClick = { onRegenerate(index) },
+                            enabled = regeneratingPostIndex == null
+                        ) {
+                            if (regeneratingPostIndex == index) {
+                                CircularProgressIndicator(Modifier.width(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("Regenerating")
+                            } else {
+                                Text("Regenerate")
+                            }
+                        }
+                    }
+                    Text(content)
+                    if (content.length > 450) {
+                        Text(
+                            "Longer than SmartAgent's 450-character readability target. Regenerate or shorten before posting.",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
+        }
+
+        Card {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text("Creator checklist", fontWeight = FontWeight.Bold)
+                Text(pack.checklist)
+            }
+        }
+    }
+}
+
+private fun openThreads(context: Context) {
+    val appIntent = context.packageManager.getLaunchIntentForPackage("com.instagram.barcelona")
+    if (appIntent != null) {
+        context.startActivity(appIntent)
+    } else {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.threads.com/")))
     }
 }
 
@@ -1725,7 +2031,7 @@ private fun SettingsScreen(
             "Open Google AI Studio in your browser, create a Gemini API key, then paste it above. SmartAgent sends product information only when you tap Generate."
         )
         Text(
-            "SmartAgent 0.7.0  |  Personal build",
+            "SmartAgent 0.8.0  |  Personal build",
             style = MaterialTheme.typography.bodySmall
         )
     }

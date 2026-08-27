@@ -1,4 +1,4 @@
-SmartAgent 0.7.0 saved-product library build
+SmartAgent 0.8.0 dedicated Threads Engine build
 
 Compose BOM: 2025.08.00
 Activity Compose: 1.11.0
@@ -22,3 +22,7 @@ section regeneration, and checks each voice-over word count against the selected
 video duration.
 It now stores up to 100 verified products privately on the phone, supports product
 search, and lets the user reopen, update, or delete saved product details.
+Threads now uses a separate structured generator instead of the generic video
+content pack. It creates one main post and up to four ordered replies, supports
+per-post copying and regeneration, provides character counts and a guided posting
+assistant, opens the Threads app, and controls where the affiliate link appears.
