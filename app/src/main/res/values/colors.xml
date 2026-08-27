@@ -1,4 +1,5 @@
 <resources>
-    <color name="smart_green">#125B50</color>
-    <color name="smart_cream">#FFF8EC</color>
+    <color name="smart_neon">#7CFF4F</color>
+    <color name="smart_black">#090D0A</color>
+    <color name="smart_charcoal">#111713</color>
 </resources>

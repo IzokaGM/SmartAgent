@@ -1,9 +1,10 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <style name="Theme.SmartAgent" parent="android:style/Theme.Material.Light.NoActionBar">
+    <style name="Theme.SmartAgent" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:windowLightStatusBar">true</item>
-        <item name="android:statusBarColor">@color/smart_cream</item>
-        <item name="android:navigationBarColor">@color/smart_cream</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">@color/smart_black</item>
+        <item name="android:navigationBarColor">@color/smart_black</item>
+        <item name="android:windowBackground">@color/smart_black</item>
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowOptOutEdgeToEdgeEnforcement" tools:targetApi="35">false</item>
