@@ -2,7 +2,7 @@
 
 SmartAgent is a private Android content assistant for Malaysian creators. It converts a product, screenshot, or content idea into a publish-ready content pack for TikTok, Facebook, Threads, or WhatsApp.
 
-## Current personal build 0.9.0
+## Current personal build 1.0.0
 
 - Affiliate and organic content modes
 - Product link input through paste or Android Share
@@ -42,6 +42,12 @@ SmartAgent is a private Android content assistant for Malaysian creators. It con
 - Affiliate-link placement in the final reply, main post, or nowhere
 - Per-post character counts with a 450-character readability target
 - One or three complete thread alternatives using different creative angles
+- Copywriting Engine 2.0 with platform-specific structures for short-form video, Facebook, WhatsApp, and Threads
+- Seven selectable marketing angles: automatic, pain point, main benefit, demonstration, value, lifestyle, and curiosity
+- Stronger natural Malaysian Malay guidance with generic-hook and unsupported-claim controls
+- Optional Flow Prompt Pack generated from an approved TikTok, Shopee Video, or Instagram Reels script
+- Master visual prompt, individual scene prompts, continuity block, negative prompt, and usage notes
+- SmartAgent remains a copywriting assistant and does not generate voice, audio, or video
 
 ## Privacy model
 
@@ -94,7 +100,6 @@ The GitHub workflow builds the debug APK automatically. No Gemini API key is sto
 
 ## Planned next improvements
 
-- Optional content calendar
-- Search and favourites in history
+- Copy quality evaluation using real product examples
 - Multiple named brand voice profiles
 - Release signing and automated device tests

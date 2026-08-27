@@ -89,6 +89,21 @@ class GeminiClient {
         }
     }
 
+    fun generateFlowPromptPack(
+        apiKey: String,
+        model: String,
+        prompt: String
+    ): Result<FlowPromptPack> = runCatching {
+        val body = createBody(
+            parts = JSONArray().put(JSONObject().put("text", prompt)),
+            temperature = 0.5,
+            maxOutputTokens = 6000,
+            enableUrlContext = false,
+            responseSchema = flowPromptPackResponseSchema()
+        )
+        flowPromptPackFromJson(extractJsonObject(execute(apiKey, model, body).text))
+    }
+
     fun regenerateSection(
         apiKey: String,
         model: String,
@@ -514,6 +529,41 @@ class GeminiClient {
         }
     }
 
+    private fun flowPromptPackFromJson(json: JSONObject): FlowPromptPack {
+        val scenes = buildList {
+            val array = json.optJSONArray("scene_prompts")
+                ?: error("Gemini returned no Flow scene prompts")
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                val prompt = item.optString("prompt").trim()
+                if (prompt.isNotBlank()) {
+                    add(
+                        FlowScenePrompt(
+                            sceneNumber = item.optInt("scene_number", index + 1),
+                            sceneTitle = item.optString("scene_title").trim().ifBlank { "Scene ${index + 1}" },
+                            prompt = prompt
+                        )
+                    )
+                }
+            }
+        }
+        return FlowPromptPack(
+            masterPrompt = json.optString("master_prompt").trim(),
+            scenes = scenes,
+            continuityPrompt = json.optString("continuity_prompt").trim(),
+            negativePrompt = json.optString("negative_prompt").trim(),
+            usageNotes = json.optString("usage_notes").trim()
+        ).also { pack ->
+            require(
+                pack.masterPrompt.isNotBlank() &&
+                    pack.scenes.isNotEmpty() &&
+                    pack.continuityPrompt.isNotBlank() &&
+                    pack.negativePrompt.isNotBlank() &&
+                    pack.usageNotes.isNotBlank()
+            ) { "Gemini returned an incomplete Flow prompt pack" }
+        }
+    }
+
     private fun contentPackItemSchema(): JSONObject {
         val properties = JSONObject()
         val required = JSONArray()
@@ -585,6 +635,50 @@ class GeminiClient {
             )
         )
         .put("required", JSONArray().put("variants"))
+
+    private fun flowPromptPackResponseSchema(): JSONObject = JSONObject()
+        .put("type", "OBJECT")
+        .put(
+            "properties",
+            JSONObject()
+                .put("master_prompt", JSONObject().put("type", "STRING"))
+                .put(
+                    "scene_prompts",
+                    JSONObject()
+                        .put("type", "ARRAY")
+                        .put(
+                            "items",
+                            JSONObject()
+                                .put("type", "OBJECT")
+                                .put(
+                                    "properties",
+                                    JSONObject()
+                                        .put("scene_number", JSONObject().put("type", "INTEGER"))
+                                        .put("scene_title", JSONObject().put("type", "STRING"))
+                                        .put("prompt", JSONObject().put("type", "STRING"))
+                                )
+                                .put(
+                                    "required",
+                                    JSONArray()
+                                        .put("scene_number")
+                                        .put("scene_title")
+                                        .put("prompt")
+                                )
+                        )
+                )
+                .put("continuity_prompt", JSONObject().put("type", "STRING"))
+                .put("negative_prompt", JSONObject().put("type", "STRING"))
+                .put("usage_notes", JSONObject().put("type", "STRING"))
+        )
+        .put(
+            "required",
+            JSONArray()
+                .put("master_prompt")
+                .put("scene_prompts")
+                .put("continuity_prompt")
+                .put("negative_prompt")
+                .put("usage_notes")
+        )
 
     private fun sectionResponseSchema(): JSONObject = JSONObject()
         .put("type", "OBJECT")

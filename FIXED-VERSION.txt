@@ -1,4 +1,4 @@
-SmartAgent 0.9.0 searchable Content Library build
+SmartAgent 1.0.0 Copywriting Engine 2.0 and Flow Prompt Pack build
 
 Compose BOM: 2025.08.00
 Activity Compose: 1.11.0
@@ -29,3 +29,10 @@ assistant, opens the Threads app, and controls where the affiliate link appears.
 The former History tab is now a searchable Content Library that keeps the latest
 100 generations, preserves favourites during regeneration, filters by platform,
 and supports open, copy, share, favourite, individual delete, and confirmed clear-all actions.
+SmartAgent now applies platform-specific copy structures, selectable marketing
+angles, stronger natural Malaysian Bahasa Melayu guidance, and additional
+controls against generic hooks and unsupported claims.
+Approved short-form video scripts can be converted into an optional external
+production prompt pack with a master visual prompt, standalone scene prompts,
+continuity instructions, a negative prompt, and usage notes. SmartAgent does
+not generate voice, audio, or video.

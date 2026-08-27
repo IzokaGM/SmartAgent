@@ -80,11 +80,13 @@ import com.smartagent.app.data.ContentSection
 import com.smartagent.app.data.BrandVoiceProfile
 import com.smartagent.app.data.ContentStyle
 import com.smartagent.app.data.ExtractionConfidence
+import com.smartagent.app.data.FlowPromptPack
 import com.smartagent.app.data.GenerationRecord
 import com.smartagent.app.data.GeminiClient
 import com.smartagent.app.data.ImageUtils
 import com.smartagent.app.data.InputMode
 import com.smartagent.app.data.LocalRepository
+import com.smartagent.app.data.MarketingAngle
 import com.smartagent.app.data.OutputLanguage
 import com.smartagent.app.data.Platform
 import com.smartagent.app.data.ProductAccessBlockedException
@@ -288,6 +290,7 @@ private fun CreateScreen(
     var duration by rememberSaveable { mutableStateOf(30) }
     var language by rememberSaveable { mutableStateOf(OutputLanguage.MALAY) }
     var style by rememberSaveable { mutableStateOf(ContentStyle.UGC) }
+    var marketingAngle by rememberSaveable { mutableStateOf(MarketingAngle.AUTO) }
     var audience by rememberSaveable { mutableStateOf("") }
     var variantCount by rememberSaveable { mutableStateOf(1) }
     var threadLength by rememberSaveable { mutableStateOf(ThreadLength.STANDARD) }
@@ -305,6 +308,9 @@ private fun CreateScreen(
     var isGenerating by remember { mutableStateOf(false) }
     var output by remember { mutableStateOf<List<ContentPack>>(emptyList()) }
     var threadsOutput by remember { mutableStateOf<List<ThreadsPack>>(emptyList()) }
+    var flowPromptPack by remember { mutableStateOf<FlowPromptPack?>(null) }
+    var isGeneratingFlowPrompts by remember { mutableStateOf(false) }
+    var flowPromptError by rememberSaveable { mutableStateOf("") }
     var selectedVariant by rememberSaveable { mutableStateOf(0) }
     var currentRequest by remember { mutableStateOf<ContentRequest?>(null) }
     var currentRecordId by remember { mutableStateOf<Long?>(null) }
@@ -343,6 +349,8 @@ private fun CreateScreen(
             imageBase64 = null
             output = emptyList()
             threadsOutput = emptyList()
+            flowPromptPack = null
+            flowPromptError = ""
             currentRequest = null
             onProductLoaded()
         }
@@ -707,6 +715,8 @@ private fun CreateScreen(
                     platform = it
                     output = emptyList()
                     threadsOutput = emptyList()
+                    flowPromptPack = null
+                    flowPromptError = ""
                     currentRequest = null
                 }
             )
@@ -759,6 +769,14 @@ private fun CreateScreen(
                 selected = style,
                 label = { it.label },
                 onSelected = { style = it }
+            )
+            Spacer(Modifier.height(10.dp))
+            Text("Marketing angle", style = MaterialTheme.typography.labelLarge)
+            ChoiceRow(
+                options = MarketingAngle.entries,
+                selected = marketingAngle,
+                label = { it.label },
+                onSelected = { marketingAngle = it }
             )
             Spacer(Modifier.height(10.dp))
             Text("Alternatives", style = MaterialTheme.typography.labelLarge)
@@ -870,6 +888,7 @@ private fun CreateScreen(
                                 durationSeconds = duration,
                                 language = language,
                                 style = style,
+                                marketingAngle = marketingAngle,
                                 audience = audience,
                                 variantCount = variantCount,
                                 threadReplyCount = threadLength.replyCount,
@@ -884,6 +903,8 @@ private fun CreateScreen(
                             isGenerating = true
                             output = emptyList()
                             threadsOutput = emptyList()
+                            flowPromptPack = null
+                            flowPromptError = ""
                             selectedVariant = 0
                             currentRequest = request
                             scope.launch {
@@ -940,7 +961,7 @@ private fun CreateScreen(
                                                 createdAt = now,
                                                 title = productName.ifBlank { "Untitled content" },
                                                 platform = platform.label,
-                                                result = generated.asVariantText()
+                                                result = generated.asVariantText(platform)
                                             )
                                         )
                                     }.onFailure {
@@ -1033,9 +1054,43 @@ private fun CreateScreen(
                 ContentPackResult(
                     packs = output,
                     selectedVariant = selectedVariant,
-                    onVariantSelected = { selectedVariant = it },
+                    onVariantSelected = {
+                        selectedVariant = it
+                        flowPromptPack = null
+                        flowPromptError = ""
+                    },
+                    platform = currentRequest?.platform ?: platform,
                     durationSeconds = currentRequest?.durationSeconds ?: duration,
                     regeneratingSection = regeneratingSection,
+                    flowPromptPack = flowPromptPack,
+                    isGeneratingFlowPrompts = isGeneratingFlowPrompts,
+                    flowPromptError = flowPromptError,
+                    onGenerateFlowPrompts = {
+                        val key = secureKeyStore.loadApiKey()
+                        val request = currentRequest
+                        val existingPack = output.getOrNull(selectedVariant)
+                        if (key == null || request == null || existingPack == null) {
+                            flowPromptError = "Generate a content pack first."
+                        } else {
+                            flowPromptError = ""
+                            isGeneratingFlowPrompts = true
+                            scope.launch {
+                                val response = withContext(Dispatchers.IO) {
+                                    geminiClient.generateFlowPromptPack(
+                                        apiKey = key,
+                                        model = repository.loadModel(),
+                                        prompt = PromptBuilder.buildFlowPromptPack(request, existingPack)
+                                    )
+                                }
+                                response.onSuccess { generated ->
+                                    flowPromptPack = generated
+                                }.onFailure { failure ->
+                                    flowPromptError = failure.message ?: "Flow prompt generation failed"
+                                }
+                                isGeneratingFlowPrompts = false
+                            }
+                        }
+                    },
                     onRegenerate = { section ->
                         val key = secureKeyStore.loadApiKey()
                         val request = currentRequest
@@ -1064,6 +1119,8 @@ private fun CreateScreen(
                                         packs[variantIndex] = updated
                                     }
                                     output = updatedPacks
+                                    flowPromptPack = null
+                                    flowPromptError = ""
                                     val recordId = currentRecordId ?: System.currentTimeMillis().also {
                                         currentRecordId = it
                                     }
@@ -1073,7 +1130,7 @@ private fun CreateScreen(
                                             createdAt = System.currentTimeMillis(),
                                             title = productName.ifBlank { "Untitled content" },
                                             platform = platform.label,
-                                            result = updatedPacks.asVariantText()
+                                            result = updatedPacks.asVariantText(platform)
                                         )
                                     )
                                 }.onFailure { failure ->
@@ -1094,14 +1151,19 @@ private fun ContentPackResult(
     packs: List<ContentPack>,
     selectedVariant: Int,
     onVariantSelected: (Int) -> Unit,
+    platform: Platform,
     durationSeconds: Int,
     regeneratingSection: ContentSection?,
+    flowPromptPack: FlowPromptPack?,
+    isGeneratingFlowPrompts: Boolean,
+    flowPromptError: String,
+    onGenerateFlowPrompts: () -> Unit,
     onRegenerate: (ContentSection) -> Unit
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val pack = packs.getOrElse(selectedVariant) { packs.first() }
-    val fullText = pack.asPlainText()
+    val fullText = pack.asPlainText(platform)
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         SectionTitle("Your content pack")
@@ -1128,7 +1190,7 @@ private fun ContentPackResult(
         }
         if (packs.size > 1) {
             OutlinedButton(
-                onClick = { clipboard.setText(AnnotatedString(packs.asVariantText())) },
+                onClick = { clipboard.setText(AnnotatedString(packs.asVariantText(platform))) },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Copy all ${packs.size} alternatives")
@@ -1142,7 +1204,7 @@ private fun ContentPackResult(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(section.label, fontWeight = FontWeight.Bold)
+                    Text(section.displayLabel(platform), fontWeight = FontWeight.Bold)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         TextButton(onClick = {
                             clipboard.setText(AnnotatedString(content))
@@ -1160,7 +1222,10 @@ private fun ContentPackResult(
                             }
                         }
                     }
-                    if (section == ContentSection.VOICE_OVER) {
+                    if (
+                        section == ContentSection.VOICE_OVER &&
+                        platform in listOf(Platform.TIKTOK, Platform.SHOPEE_VIDEO, Platform.INSTAGRAM_REELS)
+                    ) {
                         val words = content.trim().split(Regex("\\s+")).count { it.isNotBlank() }
                         val target = recommendedVoiceOverWords(durationSeconds)
                         val fitsTarget = words in target
@@ -1178,6 +1243,100 @@ private fun ContentPackResult(
                     Text(content, style = MaterialTheme.typography.bodyMedium)
                 }
             }
+        }
+
+        if (platform in listOf(Platform.TIKTOK, Platform.SHOPEE_VIDEO, Platform.INSTAGRAM_REELS)) {
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Optional Flow Prompt Pack", fontWeight = FontWeight.Bold)
+                    Text(
+                        "Turn this approved script into visual prompts to copy into Flow or another production platform. SmartAgent does not create video or audio.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Button(
+                        onClick = onGenerateFlowPrompts,
+                        enabled = !isGeneratingFlowPrompts,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (isGeneratingFlowPrompts) {
+                            CircularProgressIndicator(Modifier.width(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Creating prompts")
+                        } else {
+                            Text(if (flowPromptPack == null) "Create Flow prompts" else "Regenerate Flow prompts")
+                        }
+                    }
+                    if (flowPromptError.isNotBlank()) {
+                        Text(
+                            flowPromptError,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
+            flowPromptPack?.let { FlowPromptPackResult(it) }
+        }
+    }
+}
+
+@Composable
+private fun FlowPromptPackResult(pack: FlowPromptPack) {
+    val clipboard = LocalClipboardManager.current
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        OutlinedButton(
+            onClick = { clipboard.setText(AnnotatedString(pack.asPlainText())) },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Copy complete prompt pack")
+        }
+
+        PromptCopyCard(
+            title = "Master visual prompt",
+            content = pack.masterPrompt
+        )
+        pack.scenes.forEach { scene ->
+            PromptCopyCard(
+                title = "Scene ${scene.sceneNumber}: ${scene.sceneTitle}",
+                content = scene.prompt
+            )
+        }
+        PromptCopyCard(
+            title = "Continuity prompt",
+            content = pack.continuityPrompt
+        )
+        PromptCopyCard(
+            title = "Negative prompt",
+            content = pack.negativePrompt
+        )
+        PromptCopyCard(
+            title = "Usage notes",
+            content = pack.usageNotes
+        )
+    }
+}
+
+@Composable
+private fun PromptCopyCard(title: String, content: String) {
+    val clipboard = LocalClipboardManager.current
+    Card {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(title, fontWeight = FontWeight.Bold)
+            TextButton(onClick = { clipboard.setText(AnnotatedString(content)) }) {
+                Text("Copy prompt")
+            }
+            Text(content, style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
@@ -2178,7 +2337,7 @@ private fun SettingsScreen(
             "Open Google AI Studio in your browser, create a Gemini API key, then paste it above. SmartAgent sends product information only when you tap Generate."
         )
         Text(
-            "SmartAgent 0.9.0  |  Personal build",
+            "SmartAgent 1.0.0  |  Personal build",
             style = MaterialTheme.typography.bodySmall
         )
     }

@@ -35,6 +35,16 @@ enum class ContentStyle(val label: String) {
     TESTIMONIAL("Testimonial style")
 }
 
+enum class MarketingAngle(val label: String, val instruction: String) {
+    AUTO("Let SmartAgent choose", "Choose the strongest truthful angle for the supplied facts and audience."),
+    PAIN_POINT("Pain point", "Lead with one specific audience problem, then connect the product to a practical solution."),
+    BENEFIT("Main benefit", "Lead with the most relevant verified benefit or use case without exaggeration."),
+    DEMONSTRATION("Show it working", "Build the copy around a clear product demonstration and observable result."),
+    VALUE("Value for money", "Focus on verified value, convenience, durability, quantity, or savings. Do not invent comparisons."),
+    LIFESTYLE("Lifestyle fit", "Show naturally where the product fits into the target audience's daily routine."),
+    CURIOSITY("Curiosity", "Open with a credible curiosity gap and reveal the answer progressively without clickbait.")
+}
+
 enum class ThreadLength(val label: String, val replyCount: Int) {
     SHORT("Short: 1 reply", 1),
     STANDARD("Standard: 2 replies", 2),
@@ -57,6 +67,7 @@ data class ContentRequest(
     val durationSeconds: Int = 30,
     val language: OutputLanguage = OutputLanguage.MALAY,
     val style: ContentStyle = ContentStyle.UGC,
+    val marketingAngle: MarketingAngle = MarketingAngle.AUTO,
     val audience: String = "",
     val variantCount: Int = 1,
     val threadReplyCount: Int = ThreadLength.STANDARD.replyCount,
@@ -111,6 +122,31 @@ enum class ContentSection(val label: String) {
     HASHTAGS("Hashtags"),
     PINNED_COMMENT("Pinned comment"),
     CHECKLIST("Creator checklist")
+
+    ;
+
+    fun displayLabel(platform: Platform): String = when (this) {
+        TITLE -> "Title"
+        HOOKS -> if (platform == Platform.WHATSAPP) "Opening options" else "Hook options"
+        STORYBOARD -> when (platform) {
+            Platform.FACEBOOK -> "Post structure"
+            Platform.WHATSAPP -> "Status sequence"
+            else -> "Storyboard"
+        }
+        VOICE_OVER -> when (platform) {
+            Platform.FACEBOOK -> "Ready-to-publish post"
+            Platform.WHATSAPP -> "Ready-to-send copy"
+            else -> "Full script"
+        }
+        CAPTION -> when (platform) {
+            Platform.FACEBOOK -> "Short caption"
+            Platform.WHATSAPP -> "Short status"
+            else -> "Caption"
+        }
+        HASHTAGS -> "Hashtags"
+        PINNED_COMMENT -> if (platform == Platform.WHATSAPP) "Reply starter" else "Pinned comment"
+        CHECKLIST -> "Creator checklist"
+    }
 }
 
 data class ContentPack(
@@ -145,14 +181,41 @@ data class ContentPack(
         ContentSection.CHECKLIST -> copy(checklist = content)
     }
 
-    fun asPlainText(): String = ContentSection.entries.joinToString("\n\n") { section ->
-        "${section.label.uppercase()}\n${contentFor(section)}"
+    fun asPlainText(platform: Platform? = null): String = ContentSection.entries.joinToString("\n\n") { section ->
+        val label = platform?.let(section::displayLabel) ?: section.label
+        "${label.uppercase()}\n${contentFor(section)}"
     }
 }
 
-fun List<ContentPack>.asVariantText(): String = mapIndexed { index, pack ->
-    "ALTERNATIVE ${index + 1}\n\n${pack.asPlainText()}"
+fun List<ContentPack>.asVariantText(platform: Platform? = null): String = mapIndexed { index, pack ->
+    "ALTERNATIVE ${index + 1}\n\n${pack.asPlainText(platform)}"
 }.joinToString("\n\n====================\n\n")
+
+data class FlowScenePrompt(
+    val sceneNumber: Int,
+    val sceneTitle: String,
+    val prompt: String
+)
+
+data class FlowPromptPack(
+    val masterPrompt: String,
+    val scenes: List<FlowScenePrompt>,
+    val continuityPrompt: String,
+    val negativePrompt: String,
+    val usageNotes: String
+) {
+    fun asPlainText(): String = buildString {
+        append("MASTER VISUAL PROMPT\n").append(masterPrompt.trim())
+        scenes.forEach { scene ->
+            append("\n\nSCENE ").append(scene.sceneNumber)
+                .append(": ").append(scene.sceneTitle.trim())
+                .append('\n').append(scene.prompt.trim())
+        }
+        append("\n\nCONTINUITY PROMPT\n").append(continuityPrompt.trim())
+        append("\n\nNEGATIVE PROMPT\n").append(negativePrompt.trim())
+        append("\n\nUSAGE NOTES\n").append(usageNotes.trim())
+    }
+}
 
 data class ThreadsPack(
     val title: String,

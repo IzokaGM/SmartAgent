@@ -3,7 +3,7 @@ package com.smartagent.app.data
 object PromptBuilder {
     fun build(request: ContentRequest): String {
         val languageInstruction = when (request.language) {
-            OutputLanguage.MALAY -> "Write in natural Malaysian Bahasa Melayu. Avoid stiff translated language."
+            OutputLanguage.MALAY -> "Write in natural conversational Malaysian Bahasa Melayu. Avoid Indonesian vocabulary, stiff translations, excessive slang, and forced English mixing."
             OutputLanguage.ENGLISH -> "Write in clear British English."
         }
 
@@ -42,9 +42,29 @@ object PromptBuilder {
         } else {
             "No saved personal brand voice is active."
         }
+        val platformInstruction = when (request.platform) {
+            Platform.TIKTOK, Platform.SHOPEE_VIDEO, Platform.INSTAGRAM_REELS -> """
+                This is a short-form video copy pack. Make every scene filmable on a phone.
+                The storyboard must include timestamps, visual action, spoken line, and on-screen text.
+                The full script must sound natural when spoken and must fit $voiceOverTarget.
+            """.trimIndent()
+            Platform.FACEBOOK -> """
+                This is a Facebook copy pack, not a video script.
+                Use storyboard for the post structure and persuasion flow.
+                Use voice_over for the complete ready-to-publish Facebook post with short mobile-friendly paragraphs.
+                Use caption for a shorter alternative caption. Do not include timestamps or camera directions.
+            """.trimIndent()
+            Platform.WHATSAPP -> """
+                This is a WhatsApp copy pack, not a video script.
+                Use storyboard for a clear three-part Status sequence.
+                Use voice_over for one complete ready-to-send sales message.
+                Use caption for one short WhatsApp Status version. Keep it personal and concise.
+            """.trimIndent()
+            Platform.THREADS -> "Threads uses its dedicated generator."
+        }
 
         return """
-            You are SmartAgent, a careful content assistant for Malaysian creators.
+            You are SmartAgent, a senior direct-response copywriter for Malaysian creators.
 
             Create a publish-ready content pack using the details below.
 
@@ -53,29 +73,41 @@ object PromptBuilder {
             Platform: ${request.platform.label}
             Target duration: ${request.durationSeconds} seconds
             Content style: ${request.style.label}
+            Marketing angle: ${request.marketingAngle.label}
+            Angle direction: ${request.marketingAngle.instruction}
             Target audience: ${request.audience.ifBlank { "General Malaysian audience" }}
             $languageInstruction
 
             $brandVoiceInstruction
+            $platformInstruction
+
+            Copy quality rules:
+            1. Lead with one concrete audience tension, desire, observation, or useful surprise.
+            2. Prefer specific, simple sentences over generic hype or filler.
+            3. Make the product connection feel earned. Do not force the product into the first sentence unless the selected style calls for it.
+            4. Use one clear primary promise that is fully supported by the verified facts.
+            5. Show how a feature matters in real use instead of merely listing features.
+            6. Use a call to action that matches the platform and buying readiness of the audience.
+            7. Avoid generic openings such as "Produk ini memang best", "Ramai tak tahu", or "Korang pernah tak" unless the supplied context makes them specific and credible.
+            8. Do not use fake scarcity, fake authority, fake personal experience, or invented social proof.
 
             Accuracy rules:
             1. Never invent a price, discount, specification, rating, testimonial, benefit or product feature.
             2. Treat the editable verified fields above as the source of truth. Do not replace them with conflicting page text.
             3. Clearly mark any missing information that the creator should verify.
             4. Do not make unsupported medical, financial or guaranteed-result claims.
-            5. Keep the spoken script realistic for the selected duration.
-            6. Make the hook interesting without misleading viewers.
-            7. Target $voiceOverTarget for the full voice-over and do not exceed the selected duration.
-            8. Adapt the caption, call to action, pacing, and formatting specifically for ${request.platform.label}.
+            5. Make the hook interesting without misleading viewers.
+            6. Adapt the structure, call to action, pacing, and formatting specifically for ${request.platform.label}.
 
             Create exactly ${request.variantCount} complete content ${if (request.variantCount == 1) "pack" else "alternatives"}.
-            Each alternative must use a genuinely different creative angle while keeping every verified fact consistent.
+            ${if (request.marketingAngle == MarketingAngle.AUTO) "Each alternative must use a genuinely different creative angle." else "Keep the selected marketing angle, but make each alternative use a different hook and execution."}
+            Keep every verified fact consistent across alternatives.
 
             Return a structured variants list. Every variant must contain these fields:
             - title: one short working title.
             - hooks: three clearly numbered and distinct opening hooks.
-            - storyboard: a scene-by-scene plan with timestamps, visual or action, voice-over, and on-screen text. The final timestamp must fit the selected duration.
-            - voice_over: one clean voice-over script that can be recorded directly.
+            - storyboard: follow the platform-specific instruction above.
+            - voice_over: the complete primary copy described in the platform-specific instruction above.
             - caption: a platform-appropriate caption with a clear call to action.
             - hashtags: five to eight relevant hashtags. Never promise that they will make the post viral.
             - pinned_comment: one short comment designed to invite a genuine response.
@@ -118,6 +150,8 @@ object PromptBuilder {
             ${request.productFacts.ifBlank { "No verified facts supplied" }}
             Verification status: ${request.verificationSummary.ifBlank { "No verification recorded" }}
             Style: ${request.style.label}
+            Marketing angle: ${request.marketingAngle.label}
+            Angle direction: ${request.marketingAngle.instruction}
             Audience: ${request.audience.ifBlank { "General Malaysian audience" }}
             $languageInstruction
             $brandVoiceInstruction
@@ -135,7 +169,8 @@ object PromptBuilder {
             10. Use the exact supplied affiliate link without shortening or changing it, and only where instructed.
 
             Create exactly ${request.variantCount} complete thread ${if (request.variantCount == 1) "pack" else "alternatives"}.
-            Each alternative must use a genuinely different angle while preserving every verified fact.
+            ${if (request.marketingAngle == MarketingAngle.AUTO) "Each alternative must use a genuinely different angle." else "Keep the selected angle, but vary the opening and narrative execution."}
+            Preserve every verified fact.
 
             Return a structured variants list. Every variant must contain:
             - title: a short internal working title.
@@ -168,6 +203,7 @@ object PromptBuilder {
             Verification status: ${request.verificationSummary}
             Language: ${request.language.label}
             Style: ${request.style.label}
+            Marketing angle: ${request.marketingAngle.label}. ${request.marketingAngle.instruction}
             Audience: ${request.audience.ifBlank { "General Malaysian audience" }}
             Saved personal brand voice: ${request.brandVoice.promptText().ifBlank { "Not active" }}
             $linkInstruction
@@ -197,17 +233,53 @@ object PromptBuilder {
         Platform: ${request.platform.label}
         Duration: ${request.durationSeconds} seconds
         Style: ${request.style.label}
+        Marketing angle: ${request.marketingAngle.label}. ${request.marketingAngle.instruction}
         Audience: ${request.audience.ifBlank { "General Malaysian audience" }}
         $languageInstruction
         Saved personal brand voice: ${request.brandVoice.promptText().ifBlank { "Not active" }}
 
         The creator already has the content pack below:
 
-        ${currentPack.asPlainText()}
+        ${currentPack.asPlainText(request.platform)}
 
-        Regenerate only the section named "${section.label}". Keep it consistent with the verified product facts,
+        Regenerate only the section named "${section.displayLabel(request.platform)}". Keep it consistent with the verified product facts,
         platform, duration, audience, and the other existing sections. Never invent product facts or claims.
         Return only the replacement section content.
     """.trimIndent()
     }
+
+    fun buildFlowPromptPack(request: ContentRequest, contentPack: ContentPack): String = """
+        You are SmartAgent's production prompt writer.
+
+        Convert the approved copy pack below into reusable visual-generation prompts for Flow or a similar external platform.
+        SmartAgent does not generate video or audio. It only prepares prompts that the creator can copy elsewhere.
+
+        Product or topic: ${request.productName}
+        Verified facts:
+        ${request.productFacts.ifBlank { "No additional verified facts supplied" }}
+        Platform: ${request.platform.label}
+        Duration: ${request.durationSeconds} seconds
+        Audience: ${request.audience.ifBlank { "General Malaysian audience" }}
+
+        APPROVED COPY PACK
+        ${contentPack.asPlainText(request.platform)}
+
+        Requirements:
+        1. Write the visual prompts in precise English because they are intended for external generation tools.
+        2. Preserve the exact product identity and all verified visible details. Never invent packaging, colours, claims, prices, people, locations, or results.
+        3. Produce one scene prompt for every scene in the approved storyboard, in the same order and within the total duration.
+        4. Each scene prompt must specify vertical 9:16 framing, subject, setting, action, composition, camera movement, lighting, mood, and approximate duration.
+        5. Keep spoken copy and on-screen wording in the original content language. Do not translate it.
+        6. The master prompt must define the overall visual identity and realistic phone-shot or creator style.
+        7. The continuity prompt must keep the same person, clothing, product, packaging, room, lighting, and colour treatment across scenes when relevant.
+        8. The negative prompt must prevent duplicated limbs or objects, malformed hands, distorted faces, changed product labels, unreadable text, watermarks, unrelated logos, and inconsistent product colours.
+        9. Do not request automatic narration, music, voice cloning, or a finished video. These are production prompts only.
+
+        Return:
+        - master_prompt: one reusable visual foundation prompt.
+        - scene_prompts: an ordered list containing scene_number, scene_title, and one complete standalone prompt.
+        - continuity_prompt: one reusable consistency block.
+        - negative_prompt: one reusable exclusion block.
+        - usage_notes: brief instructions explaining the suggested order for copying these prompts into an external platform.
+    """.trimIndent()
 }
