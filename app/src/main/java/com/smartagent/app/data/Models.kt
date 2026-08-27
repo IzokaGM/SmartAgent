@@ -189,7 +189,8 @@ data class GenerationRecord(
     val createdAt: Long,
     val title: String,
     val platform: String,
-    val result: String
+    val result: String,
+    val isFavourite: Boolean = false
 )
 
 data class SavedProduct(

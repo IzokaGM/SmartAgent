@@ -65,7 +65,8 @@ class LocalRepository(context: Context) {
                             createdAt = item.getLong("createdAt"),
                             title = item.getString("title"),
                             platform = item.getString("platform"),
-                            result = item.getString("result")
+                            result = item.getString("result"),
+                            isFavourite = item.optBoolean("isFavourite", false)
                         )
                     )
                 }
@@ -74,9 +75,27 @@ class LocalRepository(context: Context) {
     }
 
     fun addHistory(record: GenerationRecord): List<GenerationRecord> {
-        val updated = listOf(record) + loadHistory().filterNot { it.id == record.id }
+        val existing = loadHistory()
+        val preservedRecord = record.copy(
+            isFavourite = record.isFavourite || existing.firstOrNull { it.id == record.id }?.isFavourite == true
+        )
+        val updated = listOf(preservedRecord) + existing.filterNot { it.id == record.id }
         saveHistory(updated.take(MAX_HISTORY))
         return updated.take(MAX_HISTORY)
+    }
+
+    fun toggleHistoryFavourite(recordId: Long): List<GenerationRecord> {
+        val updated = loadHistory().map { record ->
+            if (record.id == recordId) record.copy(isFavourite = !record.isFavourite) else record
+        }
+        saveHistory(updated)
+        return updated
+    }
+
+    fun deleteHistory(recordId: Long): List<GenerationRecord> {
+        val updated = loadHistory().filterNot { it.id == recordId }
+        saveHistory(updated)
+        return updated
     }
 
     fun clearHistory() {
@@ -132,6 +151,7 @@ class LocalRepository(context: Context) {
                     .put("title", record.title)
                     .put("platform", record.platform)
                     .put("result", record.result)
+                    .put("isFavourite", record.isFavourite)
             )
         }
         preferences.edit().putString(KEY_HISTORY, array.toString()).apply()
@@ -169,7 +189,7 @@ class LocalRepository(context: Context) {
         private const val KEY_BRAND_CTA = "brand_cta"
         private const val KEY_BRAND_USE = "brand_phrases_use"
         private const val KEY_BRAND_AVOID = "brand_phrases_avoid"
-        private const val MAX_HISTORY = 50
+        private const val MAX_HISTORY = 100
         private const val MAX_SAVED_PRODUCTS = 100
     }
 }

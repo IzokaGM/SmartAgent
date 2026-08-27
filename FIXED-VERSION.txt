@@ -1,4 +1,4 @@
-SmartAgent 0.8.0 dedicated Threads Engine build
+SmartAgent 0.9.0 searchable Content Library build
 
 Compose BOM: 2025.08.00
 Activity Compose: 1.11.0
@@ -26,3 +26,6 @@ Threads now uses a separate structured generator instead of the generic video
 content pack. It creates one main post and up to four ordered replies, supports
 per-post copying and regeneration, provides character counts and a guided posting
 assistant, opens the Threads app, and controls where the affiliate link appears.
+The former History tab is now a searchable Content Library that keeps the latest
+100 generations, preserves favourites during regeneration, filters by platform,
+and supports open, copy, share, favourite, individual delete, and confirmed clear-all actions.

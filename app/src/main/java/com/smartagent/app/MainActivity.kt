@@ -147,7 +147,7 @@ class MainActivity : ComponentActivity() {
 private enum class AppTab(val label: String, val symbol: String) {
     CREATE("Create", "✦"),
     PRODUCTS("Products", "▣"),
-    HISTORY("History", "◷"),
+    HISTORY("Library", "◷"),
     SETTINGS("Settings", "⚙")
 }
 
@@ -231,6 +231,12 @@ private fun SmartAgentApp(
 
                 AppTab.HISTORY -> HistoryScreen(
                     records = history,
+                    onToggleFavourite = { record ->
+                        history = repository.toggleHistoryFavourite(record.id)
+                    },
+                    onDelete = { record ->
+                        history = repository.deleteHistory(record.id)
+                    },
                     onClear = {
                         repository.clearHistory()
                         history = emptyList()
@@ -1762,10 +1768,48 @@ private fun ProductsScreen(
 @Composable
 private fun HistoryScreen(
     records: List<GenerationRecord>,
+    onToggleFavourite: (GenerationRecord) -> Unit,
+    onDelete: (GenerationRecord) -> Unit,
     onClear: () -> Unit
 ) {
-    var selectedRecord by remember { mutableStateOf<GenerationRecord?>(null) }
+    val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
+    var selectedRecord by remember { mutableStateOf<GenerationRecord?>(null) }
+    var recordToDelete by remember { mutableStateOf<GenerationRecord?>(null) }
+    var showClearConfirmation by remember { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var selectedFilter by rememberSaveable { mutableStateOf("All") }
+
+    val filters = remember(records) {
+        listOf("All", "Favourites") + records.map { it.platform }.distinct().sorted()
+    }
+    LaunchedEffect(filters) {
+        if (selectedFilter !in filters) selectedFilter = "All"
+    }
+    val filteredRecords = remember(records, query, selectedFilter) {
+        records.filter { record ->
+            val matchesFilter = when (selectedFilter) {
+                "All" -> true
+                "Favourites" -> record.isFavourite
+                else -> record.platform == selectedFilter
+            }
+            val cleanQuery = query.trim()
+            val matchesQuery = cleanQuery.isBlank() || listOf(
+                record.title,
+                record.platform,
+                record.result
+            ).any { it.contains(cleanQuery, ignoreCase = true) }
+            matchesFilter && matchesQuery
+        }
+    }
+
+    fun shareRecord(record: GenerationRecord) {
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, record.result)
+        }
+        context.startActivity(Intent.createChooser(shareIntent, "Share saved content"))
+    }
 
     if (selectedRecord != null) {
         val record = selectedRecord!!
@@ -1792,6 +1836,42 @@ private fun HistoryScreen(
         )
     }
 
+    recordToDelete?.let { record ->
+        AlertDialog(
+            onDismissRequest = { recordToDelete = null },
+            title = { Text("Delete this saved content?") },
+            text = { Text(record.title) },
+            confirmButton = {
+                TextButton(onClick = {
+                    onDelete(record)
+                    if (selectedRecord?.id == record.id) selectedRecord = null
+                    recordToDelete = null
+                }) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { recordToDelete = null }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (showClearConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirmation = false },
+            title = { Text("Clear the Content Library?") },
+            text = { Text("This permanently removes all saved generations, including favourites, from this phone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    onClear()
+                    selectedRecord = null
+                    showClearConfirmation = false
+                }) { Text("Clear all") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirmation = false }) { Text("Cancel") }
+            }
+        )
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 28.dp),
@@ -1803,10 +1883,36 @@ private fun HistoryScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                SectionTitle("Generation history")
+                SectionTitle("Content Library")
                 if (records.isNotEmpty()) {
-                    TextButton(onClick = onClear) { Text("Clear") }
+                    TextButton(onClick = { showClearConfirmation = true }) { Text("Clear all") }
                 }
+            }
+        }
+
+        if (records.isNotEmpty()) {
+            item {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Search saved content") },
+                    placeholder = { Text("Title, platform, hook, or product") },
+                    singleLine = true
+                )
+            }
+            item {
+                ChoiceRow(
+                    options = filters,
+                    selected = selectedFilter.takeIf { it in filters } ?: "All",
+                    label = { it },
+                    onSelected = { selectedFilter = it }
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "${filteredRecords.size} of ${records.size} saved generations",
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
         }
 
@@ -1816,15 +1922,43 @@ private fun HistoryScreen(
                     Column(Modifier.padding(20.dp)) {
                         Text("No content yet", fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(5.dp))
-                        Text("Your latest 50 content packs will be stored privately on this phone.")
+                        Text("Your latest 100 content packs and Threads chains will be stored privately on this phone.")
+                    }
+                }
+            }
+        } else if (filteredRecords.isEmpty()) {
+            item {
+                Card {
+                    Column(Modifier.padding(20.dp)) {
+                        Text("No matching content", fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(5.dp))
+                        Text("Try another search or choose a different filter.")
                     }
                 }
             }
         } else {
-            items(records, key = { it.id }) { record ->
-                Card(onClick = { selectedRecord = record }) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text(record.title, fontWeight = FontWeight.Bold)
+            items(filteredRecords, key = { it.id }) { record ->
+                Card {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(7.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                record.title,
+                                modifier = Modifier.weight(1f),
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                if (record.isFavourite) "★" else "☆",
+                                color = MaterialTheme.colorScheme.primary,
+                                style = MaterialTheme.typography.titleLarge
+                            )
+                        }
                         Spacer(Modifier.height(4.dp))
                         Text(
                             "${record.platform}  |  ${DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(record.createdAt))}",
@@ -1835,6 +1969,19 @@ private fun HistoryScreen(
                             record.result.take(150).replace('\n', ' '),
                             style = MaterialTheme.typography.bodyMedium
                         )
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Button(onClick = { selectedRecord = record }) { Text("Open") }
+                            TextButton(onClick = { onToggleFavourite(record) }) {
+                                Text(if (record.isFavourite) "Unfavourite" else "Favourite")
+                            }
+                            TextButton(onClick = {
+                                clipboard.setText(AnnotatedString(record.result))
+                            }) { Text("Copy") }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            TextButton(onClick = { shareRecord(record) }) { Text("Share") }
+                            TextButton(onClick = { recordToDelete = record }) { Text("Delete") }
+                        }
                     }
                 }
             }
@@ -2031,7 +2178,7 @@ private fun SettingsScreen(
             "Open Google AI Studio in your browser, create a Gemini API key, then paste it above. SmartAgent sends product information only when you tap Generate."
         )
         Text(
-            "SmartAgent 0.8.0  |  Personal build",
+            "SmartAgent 0.9.0  |  Personal build",
             style = MaterialTheme.typography.bodySmall
         )
     }
