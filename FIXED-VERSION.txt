@@ -1,4 +1,4 @@
-SmartAgent 1.1.0 Professional UI and neon green branding build
+SmartAgent 1.1.1 Consistent logo and eye-friendly colour correction
 
 Compose BOM: 2025.08.00
 Activity Compose: 1.11.0
@@ -39,3 +39,6 @@ not generate voice, audio, or video.
 The interface now uses a professional charcoal and neon green visual system,
 a new SmartAgent S launcher mark, cleaner typography, rounded components,
 refined navigation, and stronger content hierarchy in light and dark themes.
+The launcher and in-app header now use the same rounded-square S identity.
+Neon green is reserved for the logo, while the rest of the interface uses
+softer sage, charcoal, and neutral colours for more comfortable viewing.

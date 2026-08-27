@@ -2,7 +2,7 @@
 
 SmartAgent is a private Android content assistant for Malaysian creators. It converts a product, screenshot, or content idea into a publish-ready content pack for TikTok, Facebook, Threads, or WhatsApp.
 
-## Current personal build 1.1.0
+## Current personal build 1.1.1
 
 - Affiliate and organic content modes
 - Product link input through paste or Android Share
@@ -51,6 +51,8 @@ SmartAgent is a private Android content assistant for Malaysian creators. It con
 - Professional charcoal and neon green visual system with matching light and dark themes
 - New neon green SmartAgent launcher logo and in-app brand mark
 - Cleaner typography, rounded surfaces, refined navigation, branded section headings, and improved visual hierarchy
+- Matching rounded-square S mark in the launcher and app header
+- Neon green is reserved for the SmartAgent logo; interface accents use softer sage and neutral tones
 
 ## Privacy model
 

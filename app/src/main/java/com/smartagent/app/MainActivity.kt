@@ -66,6 +66,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -2386,7 +2387,7 @@ private fun SettingsScreen(
             "Open Google AI Studio in your browser, create a Gemini API key, then paste it above. SmartAgent sends product information only when you tap Generate."
         )
         Text(
-            "SmartAgent 1.1.0  |  Personal build",
+            "SmartAgent 1.1.1  |  Personal build",
             style = MaterialTheme.typography.bodySmall
         )
     }
@@ -2420,13 +2421,13 @@ private fun SmartAgentBrandMark() {
             .width(42.dp)
             .height(42.dp),
         shape = RoundedCornerShape(13.dp),
-        color = MaterialTheme.colorScheme.primary,
+        color = Color(0xFF7CFF4F),
         shadowElevation = 2.dp
     ) {
         Box(contentAlignment = Alignment.Center) {
             Text(
                 "S",
-                color = MaterialTheme.colorScheme.onPrimary,
+                color = Color(0xFF071006),
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Black
             )
