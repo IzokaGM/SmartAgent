@@ -987,7 +987,7 @@ jobs:
           anV4CwABBAAAAAAEAAAAAFBLBQYAAAAALwAvAAYVAADmvwAAAAA=
           SMARTAGENT_SOURCE
 
-          echo "791667b59ad30244f2787158e8dcfdebb8fcfe8561264bcf16ff055345680ef8  $source_zip" | sha256sum --check -
+          echo "4808bc4b6340183b2686f177462bba260815419b8f9b630d147610cb25bfecc6  $source_zip" | sha256sum --check -
 
           mkdir -p "$extract_root"
           unzip -q "$source_zip" -d "$extract_root"
